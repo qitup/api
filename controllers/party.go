@@ -9,17 +9,17 @@ import (
 )
 
 func CreateParty(context *gin.Context) {
-	session := context.MustGet("session").(*mgo.Session)
+	mongo_session := context.MustGet("mongo_session").(*mgo.Session)
 
 	var data struct {
-		Name     string `json:"name" bson:"name"`
-		JoinCode string `json:"join_code" bson:"join_code"`
+		Name     string `json:"name"`
+		JoinCode string `json:"join_code"`
 	}
 
 	if context.BindJSON(&data) == nil {
-		party := models.NewParty(data.JoinCode, data.Name)
+		party := models.NewParty(data.JoinCode, data.Name, models.User{})
 
-		datastore.InsertParty(session.DB("test"), party)
+		datastore.InsertParty(mongo_session.DB("test"), party)
 
 		context.JSON(200, party)
 		return
