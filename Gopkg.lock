@@ -2,10 +2,10 @@
 
 
 [[projects]]
-  name = "github.com/garyburd/redigo"
-  packages = ["internal","redis"]
-  revision = "433969511232c397de61b1442f9fd49ec06ae9ba"
-  version = "v1.1.0"
+  name = "github.com/dgrijalva/jwt-go"
+  packages = ["."]
+  revision = "d2709f9f1f31ebcda9651b03077758c1f3a0018c"
+  version = "v3.0.0"
 
 [[projects]]
   branch = "master"
@@ -51,7 +51,7 @@
 
 [[projects]]
   name = "github.com/markbates/goth"
-  packages = [".","gothic","providers/spotify"]
+  packages = ["."]
   revision = "6c3a31e5f6aa001e8c3d6cec3f65d5bcc0240e69"
   version = "v1.42.0"
 
@@ -60,6 +60,12 @@
   packages = ["."]
   revision = "0360b2af4f38e8d38c7fce2a9f4e702702d73a39"
   version = "v0.0.3"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/terev/goth"
+  packages = ["gothic","providers/spotify"]
+  revision = "69abff2836b731854f6e0bd9e1aedf4924f1800a"
 
 [[projects]]
   branch = "master"
@@ -92,12 +98,6 @@
   version = "v1.0.0"
 
 [[projects]]
-  name = "gopkg.in/boj/redistore.v1"
-  packages = ["."]
-  revision = "fc113767cd6b051980f260d6dbe84b2740c46ab0"
-  version = "v1.2"
-
-[[projects]]
   name = "gopkg.in/go-playground/validator.v8"
   packages = ["."]
   revision = "5f1438d3fca68893a817e4a66806cea46a9e4ebf"
@@ -118,6 +118,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "3dd33f7b7fbb16b564bc1e8503bed9d609e69fa1bb243b37a7ba2c434e23ca5c"
+  inputs-digest = "2428c816aaa30303bae9929423a2aa8b42c63759c3d6d9ae8f1f5ca128b2bbbe"
   solver-name = "gps-cdcl"
   solver-version = 1

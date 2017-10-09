@@ -9,14 +9,29 @@ import (
 	"net/http"
 	"fmt"
 	//"github.com/zmb3/spotify"
-	"github.com/markbates/goth/gothic"
-	provider_spotify "github.com/markbates/goth/providers/spotify"
+	"github.com/terev/goth/gothic"
+	provider_spotify "github.com/terev/goth/providers/spotify"
 	"github.com/markbates/goth"
 	"os"
-	"gopkg.in/boj/redistore.v1"
 	"strings"
-	"regexp"
+	"github.com/dgrijalva/jwt-go"
+	"errors"
+	"encoding/base64"
 )
+
+var signing_key []byte
+
+func init() {
+	if key_data, exists := os.LookupEnv("SIGNING_KEY"); exists {
+		if key, err := base64.StdEncoding.DecodeString(key_data); err == nil {
+			signing_key = key
+		} else {
+			panic(err)
+		}
+	} else {
+		panic(errors.New("the signing key must be provided in an environment variable"))
+	}
+}
 
 func main() {
 	// Disable Console Color
@@ -29,17 +44,8 @@ func main() {
 		context.JSON(200, user)
 	})
 
-	// Fetch new store.
-	store, err := redistore.NewRediStore(10, "tcp", "redis:6379", "", []byte("secret-key"))
-	if err != nil {
-		panic(err)
-	}
-	defer store.Close()
-
-	gothic.Store = store
-
 	goth.UseProviders(
-		provider_spotify.New(os.Getenv("SPOTIFY_ID"), os.Getenv("SPOTIFY_SECRET"), "http://localhost:8081/auth/spotify/callback"),
+		provider_spotify.New(os.Getenv("SPOTIFY_ID"), os.Getenv("SPOTIFY_SECRET"), "http://10.0.2.2:8081/auth/spotify/callback"),
 	)
 
 	gothic.GetProviderName = func(req *http.Request) (string, error) {
@@ -49,13 +55,42 @@ func main() {
 	}
 
 	r.GET("/auth/:provider/callback", func(context *gin.Context) {
-		user, err := gothic.CompleteUserAuth(context.Writer, context.Request)
+		identity, err := gothic.CompleteUserAuth(context.Writer, context.Request)
 		if err != nil {
 			fmt.Fprintln(context.Writer, err)
 			return
 		}
 
-		context.JSON(200, user)
+		type APIClaims struct {
+			jwt.StandardClaims
+			AccessToken string `json:"access_token"`
+		}
+
+		claims := APIClaims{
+			StandardClaims: jwt.StandardClaims{
+				ExpiresAt: identity.ExpiresAt.Unix(),
+				Issuer:    "qitup.ca",
+				Subject:   "id",
+			},
+		}
+
+		if identity.Provider == "spotify" {
+			claims.AccessToken = identity.AccessToken
+		}
+
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+		// Sign and get the complete encoded token as a string using the secret
+		token_blob, err := token.SignedString(signing_key)
+
+		if err != nil {
+			context.Error(err)
+		}
+
+		payload := gin.H{"token": token_blob}
+
+		// Pass the JWT token, and identity access token to the client
+		context.JSON(200, payload)
 	})
 
 	r.GET("/logout/:provider", func(context *gin.Context) {
@@ -70,13 +105,8 @@ func main() {
 		if user, err := gothic.CompleteUserAuth(context.Writer, context.Request); err == nil {
 			context.Set("user", user)
 			context.Next()
-		} else if url, err := gothic.GetAuthURL(context.Writer, context.Request); err == nil {
-			context.JSON(200, gin.H{
-				"auth_url": url,
-			})
 		} else {
-			context.Error(err)
-			context.Status(500)
+			gothic.BeginAuthHandler(context.Writer, context.Request)
 		}
 	})
 
