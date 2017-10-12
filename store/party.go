@@ -1,10 +1,12 @@
-package datastore
+package store
 
 import (
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
 	"dubclan/api/models"
 )
+
+const collection = "users"
 
 func InsertParty(db *mgo.Database, p *models.Party) error {
 	err := coll(db).Insert(p)

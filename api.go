@@ -3,58 +3,57 @@ package main
 import (
 	"github.com/gin-gonic/gin"
 	"gopkg.in/mgo.v2"
-
-	"dubclan/api/middleware"
+	"dubclan/api/store"
 	"dubclan/api/controllers"
 	"net/http"
-	//"github.com/zmb3/spotify"
 	"github.com/terev/goth/gothic"
 	provider_spotify "github.com/terev/goth/providers/spotify"
 	"github.com/markbates/goth"
 	"os"
 	"strings"
-	"github.com/dgrijalva/jwt-go"
-	"errors"
 	"encoding/base64"
 	"github.com/gin-contrib/sessions"
-	"github.com/auth0/go-jwt-middleware"
+	"gopkg.in/dgrijalva/jwt-go.v3"
+	jwt_middleware "github.com/appleboy/gin-jwt"
+	"time"
+	"github.com/urfave/cli"
 )
 
-var signing_key []byte
+var flags = []cli.Flag{
+	cli.StringFlag{
+		EnvVar: "SIGNING_KEY",
+		Name:   "signing-key",
+		Usage:  "signing key",
+	},
+	cli.StringFlag{
+		EnvVar: "DATABASE",
+		Name: "database",
+		Value: "dev",
+	},
+}
 
-func init() {
-	if key_data, exists := os.LookupEnv("SIGNING_KEY"); exists {
-		if key, err := base64.StdEncoding.DecodeString(key_data); err == nil {
-			signing_key = key
-		} else {
-			panic(err)
-		}
+func before(context *cli.Context) error {
+	key_data := context.String("signing-key")
+
+	if key, err := base64.StdEncoding.DecodeString(key_data); err == nil {
+		context.Set("signing-key", string(key))
 	} else {
-		panic(errors.New("the signing key must be provided in an environment variable"))
+		return err
 	}
+
+	return nil
 }
 
-func jwt_handler(jwt_middleware *jwtmiddleware.JWTMiddleware) gin.HandlerFunc {
-	return func(context *gin.Context) {
-		if err := jwt_middleware.CheckJWT(context.Writer, context.Request); err == nil {
-			context.Next()
-		} else {
-			context.Error(err)
-			context.Status(401)
-		}
-	}
-}
-
-func main() {
+func api(cli *cli.Context) error {
 	// Disable Console Color
 	// gin.DisableConsoleColor()
 	r := gin.Default()
 
-	store, err := sessions.NewRedisStore(10, "tcp", "redis:6379", "", []byte("temp_secret"))
+	redis, err := sessions.NewRedisStore(10, "tcp", "redis:6379", "", []byte("temp_secret"))
 	if err != nil {
 		panic(err)
 	}
-	gothic.Store = store
+	gothic.Store = redis
 
 	session, err := mgo.Dial("mongodb://mongodb:27017")
 
@@ -63,7 +62,7 @@ func main() {
 	}
 	defer session.Close()
 
-	r.Use(middleware.Store(session))
+	r.Use(store.Middleware(session, cli))
 
 	goth.UseProviders(
 		provider_spotify.New(
@@ -80,14 +79,18 @@ func main() {
 		return parts[2], nil
 	}
 
-	// Set up jwt middleware used to extract authorization tokens
-	jwt_middleware := jwtmiddleware.New(jwtmiddleware.Options{
-		ValidationKeyGetter: func(token *jwt.Token) (interface{}, error) {
-			return signing_key, nil
-		},
+	auth_middleware := &jwt_middleware.GinJWTMiddleware{
+		Realm:      "api",
+		Key:        []byte(cli.String("signing-key")),
+		Timeout:    time.Hour,
+		MaxRefresh: time.Hour,
 
-		SigningMethod: jwt.SigningMethodHS256,
-	})
+		TimeFunc: time.Now,
+
+		IdentityHandler: func(claims jwt.MapClaims) string {
+			return claims["sub"].(string)
+		},
+	}
 
 	r.GET("/auth/:provider/callback", func(context *gin.Context) {
 		identity, err := gothic.CompleteUserAuth(context.Writer, context.Request)
@@ -116,7 +119,7 @@ func main() {
 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
 		// Sign and get the complete encoded token as a string using the secret
-		token_blob, err := token.SignedString(signing_key)
+		token_blob, err := token.SignedString([]byte(cli.String("signing-key")))
 
 		if err != nil {
 			context.Error(err)
@@ -145,7 +148,7 @@ func main() {
 		}
 	})
 
-	r.Use(jwt_handler(jwt_middleware))
+	r.Use(auth_middleware.MiddlewareFunc())
 
 	party := r.Group("/party")
 
@@ -153,5 +156,5 @@ func main() {
 	party.GET("/:join_code", controllers.GetParty)
 
 	// Listen and Server in 0.0.0.0:8080
-	r.Run(":8081")
+	return r.Run(":8081")
 }

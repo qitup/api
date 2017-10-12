@@ -4,9 +4,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"gopkg.in/mgo.v2"
 
-	"dubclan/api/datastore"
+	"dubclan/api/store"
 	"dubclan/api/models"
-	"github.com/dgrijalva/jwt-go"
+	"gopkg.in/dgrijalva/jwt-go.v3"
 	"github.com/zmb3/spotify"
 	"os"
 	"golang.org/x/oauth2"
@@ -14,7 +14,7 @@ import (
 )
 
 func CreateParty(context *gin.Context) {
-	mongo_session := context.MustGet("mongo_session").(*mgo.Session)
+	mongo := context.MustGet("mongo").(*mgo.Database)
 
 	var data struct {
 		Name     string `json:"name"`
@@ -24,7 +24,7 @@ func CreateParty(context *gin.Context) {
 	if context.BindJSON(&data) == nil {
 		party := models.NewParty(data.JoinCode, data.Name, models.User{})
 
-		datastore.InsertParty(mongo_session.DB("test"), party)
+		store.InsertParty(mongo, party)
 
 		context.JSON(200, party)
 		return
@@ -34,7 +34,7 @@ func CreateParty(context *gin.Context) {
 }
 
 func GetParty(c *gin.Context) {
-	claims := c.Request.Context().Value("user").(*jwt.Token).Claims.(jwt.MapClaims)
+	claims := c.MustGet("JWT_PAYLOAD").(jwt.MapClaims)
 
 	auth := spotify.NewAuthenticator(os.Getenv("BASE_HOST")+"/auth/spotify/callback", spotify.ScopeUserReadPrivate)
 
