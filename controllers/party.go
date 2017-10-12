@@ -6,6 +6,11 @@ import (
 
 	"dubclan/api/datastore"
 	"dubclan/api/models"
+	"github.com/dgrijalva/jwt-go"
+	"github.com/zmb3/spotify"
+	"os"
+	"golang.org/x/oauth2"
+	"time"
 )
 
 func CreateParty(context *gin.Context) {
@@ -29,5 +34,16 @@ func CreateParty(context *gin.Context) {
 }
 
 func GetParty(c *gin.Context) {
+	claims := c.Request.Context().Value("user").(*jwt.Token).Claims.(jwt.MapClaims)
 
+	auth := spotify.NewAuthenticator(os.Getenv("BASE_HOST")+"/auth/spotify/callback", spotify.ScopeUserReadPrivate)
+
+	client := auth.NewClient(&oauth2.Token{
+		AccessToken: claims["access_token"].(string),
+		Expiry:      time.Unix(int64(claims["exp"].(float64)), 0),
+	})
+
+	client.PlayOpt(&spotify.PlayOptions{
+		URIs: []spotify.URI{"spotify:track:29tzM8oIgOxBr3cI9CBOpb"},
+	})
 }

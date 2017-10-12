@@ -7,7 +7,6 @@ import (
 	"dubclan/api/middleware"
 	"dubclan/api/controllers"
 	"net/http"
-	"fmt"
 	//"github.com/zmb3/spotify"
 	"github.com/terev/goth/gothic"
 	provider_spotify "github.com/terev/goth/providers/spotify"
@@ -17,6 +16,8 @@ import (
 	"github.com/dgrijalva/jwt-go"
 	"errors"
 	"encoding/base64"
+	"github.com/gin-contrib/sessions"
+	"github.com/auth0/go-jwt-middleware"
 )
 
 var signing_key []byte
@@ -33,19 +34,44 @@ func init() {
 	}
 }
 
+func jwt_handler(jwt_middleware *jwtmiddleware.JWTMiddleware) gin.HandlerFunc {
+	return func(context *gin.Context) {
+		if err := jwt_middleware.CheckJWT(context.Writer, context.Request); err == nil {
+			context.Next()
+		} else {
+			context.Error(err)
+			context.Status(401)
+		}
+	}
+}
+
 func main() {
 	// Disable Console Color
 	// gin.DisableConsoleColor()
 	r := gin.Default()
 
-	// Ping test
-	r.GET("/ping", func(context *gin.Context) {
-		user := context.MustGet("user").(goth.User)
-		context.JSON(200, user)
-	})
+	store, err := sessions.NewRedisStore(10, "tcp", "redis:6379", "", []byte("temp_secret"))
+	if err != nil {
+		panic(err)
+	}
+	gothic.Store = store
+
+	session, err := mgo.Dial("mongodb://mongodb:27017")
+
+	if err != nil {
+		panic(err)
+	}
+	defer session.Close()
+
+	r.Use(middleware.Store(session))
 
 	goth.UseProviders(
-		provider_spotify.New(os.Getenv("SPOTIFY_ID"), os.Getenv("SPOTIFY_SECRET"), "http://10.0.2.2:8081/auth/spotify/callback"),
+		provider_spotify.New(
+			os.Getenv("SPOTIFY_ID"),
+			os.Getenv("SPOTIFY_SECRET"),
+			os.Getenv("BASE_HOST")+"/auth/spotify/callback",
+			"streaming", "user-library-read",
+		),
 	)
 
 	gothic.GetProviderName = func(req *http.Request) (string, error) {
@@ -54,10 +80,19 @@ func main() {
 		return parts[2], nil
 	}
 
+	// Set up jwt middleware used to extract authorization tokens
+	jwt_middleware := jwtmiddleware.New(jwtmiddleware.Options{
+		ValidationKeyGetter: func(token *jwt.Token) (interface{}, error) {
+			return signing_key, nil
+		},
+
+		SigningMethod: jwt.SigningMethodHS256,
+	})
+
 	r.GET("/auth/:provider/callback", func(context *gin.Context) {
 		identity, err := gothic.CompleteUserAuth(context.Writer, context.Request)
 		if err != nil {
-			fmt.Fprintln(context.Writer, err)
+			context.Error(err)
 			return
 		}
 
@@ -87,10 +122,10 @@ func main() {
 			context.Error(err)
 		}
 
-		payload := gin.H{"token": token_blob}
-
 		// Pass the JWT token, and identity access token to the client
-		context.JSON(200, payload)
+		context.JSON(200, gin.H{
+			"token": token_blob,
+		})
 	})
 
 	r.GET("/logout/:provider", func(context *gin.Context) {
@@ -110,14 +145,7 @@ func main() {
 		}
 	})
 
-	session, err := mgo.Dial("mongodb://mongodb:27017")
-
-	if err != nil {
-		panic(err)
-	}
-	defer session.Close()
-
-	r.Use(middleware.Store(session))
+	r.Use(jwt_handler(jwt_middleware))
 
 	party := r.Group("/party")
 

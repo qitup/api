@@ -2,10 +2,46 @@
 
 
 [[projects]]
+  branch = "master"
+  name = "github.com/auth0/go-jwt-middleware"
+  packages = ["."]
+  revision = "5493cabe49f7bfa6e2ec444a09d334d90cd4e2bd"
+
+[[projects]]
+  name = "github.com/boj/redistore"
+  packages = ["."]
+  revision = "fc113767cd6b051980f260d6dbe84b2740c46ab0"
+  version = "v1.2"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/bradfitz/gomemcache"
+  packages = ["memcache"]
+  revision = "1952afaa557dc08e8e0d89eafab110fb501c1a2b"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/bradleypeabody/gorilla-sessions-memcache"
+  packages = ["."]
+  revision = "75ee37df8664a47cd5d9eb84d41e1f2b08086893"
+
+[[projects]]
   name = "github.com/dgrijalva/jwt-go"
   packages = ["."]
   revision = "d2709f9f1f31ebcda9651b03077758c1f3a0018c"
   version = "v3.0.0"
+
+[[projects]]
+  name = "github.com/garyburd/redigo"
+  packages = ["internal","redis"]
+  revision = "433969511232c397de61b1442f9fd49ec06ae9ba"
+  version = "v1.1.0"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/gin-contrib/sessions"
+  packages = ["."]
+  revision = "cccdeef56346e7037ca92de250c2b55ef5e7ffe3"
 
 [[projects]]
   branch = "master"
@@ -50,6 +86,12 @@
   version = "v1.1"
 
 [[projects]]
+  branch = "master"
+  name = "github.com/kidstuff/mongostore"
+  packages = ["."]
+  revision = "256d65ac5b0e35e7c5ebb3f175c0bed1e5c2b253"
+
+[[projects]]
   name = "github.com/markbates/goth"
   packages = ["."]
   revision = "6c3a31e5f6aa001e8c3d6cec3f65d5bcc0240e69"
@@ -72,6 +114,12 @@
   name = "github.com/ugorji/go"
   packages = ["codec"]
   revision = "54210f4e076c57f351166f0ed60e67d3fca57a36"
+
+[[projects]]
+  branch = "master"
+  name = "github.com/zmb3/spotify"
+  packages = ["."]
+  revision = "69bbd6f6bcb82bd559809be400df6477eff6d482"
 
 [[projects]]
   branch = "master"
@@ -118,6 +166,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "2428c816aaa30303bae9929423a2aa8b42c63759c3d6d9ae8f1f5ca128b2bbbe"
+  inputs-digest = "6ce3e38dffb8ba42af234f4309579fbebebd4e7f0c8a749e6b7ef6e19770363e"
   solver-name = "gps-cdcl"
   solver-version = 1

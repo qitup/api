@@ -12,7 +12,7 @@ func Store(session *mgo.Session) gin.HandlerFunc {
 
 		defer new_session.Close()
 
-		context.Set("session", new_session)
+		context.Set("mongo_session", new_session)
 
 		context.Next()
 	}
