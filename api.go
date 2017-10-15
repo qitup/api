@@ -6,9 +6,9 @@ import (
 	"dubclan/api/store"
 	"dubclan/api/controllers"
 	"net/http"
-	"github.com/terev/goth/gothic"
-	provider_spotify "github.com/terev/goth/providers/spotify"
+	provider_spotify "github.com/markbates/goth/providers/spotify"
 	"github.com/markbates/goth"
+	"github.com/terev/goth/gothic"
 	"os"
 	"strings"
 	"encoding/base64"
@@ -17,9 +17,19 @@ import (
 	jwt_middleware "github.com/appleboy/gin-jwt"
 	"time"
 	"github.com/urfave/cli"
+	"dubclan/api/models"
 )
 
 var flags = []cli.Flag{
+	cli.StringFlag{
+		EnvVar: "PUBLIC_HOST",
+		Name:   "public-host",
+	},
+	cli.StringFlag{
+		EnvVar: "SESSION_SECRET",
+		Name:   "session-secret",
+		Value: "secret",
+	},
 	cli.StringFlag{
 		EnvVar: "SIGNING_KEY",
 		Name:   "signing-key",
@@ -27,8 +37,8 @@ var flags = []cli.Flag{
 	},
 	cli.StringFlag{
 		EnvVar: "DATABASE",
-		Name: "database",
-		Value: "dev",
+		Name:   "database",
+		Value:  "dev",
 	},
 }
 
@@ -49,7 +59,7 @@ func api(cli *cli.Context) error {
 	// gin.DisableConsoleColor()
 	r := gin.Default()
 
-	redis, err := sessions.NewRedisStore(10, "tcp", "redis:6379", "", []byte("temp_secret"))
+	redis, err := sessions.NewRedisStore(10, "tcp", "redis:6379", "", []byte(cli.String("session-secret")))
 	if err != nil {
 		panic(err)
 	}
@@ -68,7 +78,7 @@ func api(cli *cli.Context) error {
 		provider_spotify.New(
 			os.Getenv("SPOTIFY_ID"),
 			os.Getenv("SPOTIFY_SECRET"),
-			os.Getenv("BASE_HOST")+"/auth/spotify/callback",
+			cli.String("public-host")+"/auth/spotify/callback",
 			"streaming", "user-library-read",
 		),
 	)
@@ -99,6 +109,13 @@ func api(cli *cli.Context) error {
 			return
 		}
 
+		user, err := controllers.CompleteUserAuth(context, models.Identity(identity))
+
+		if err != nil {
+			context.Error(err)
+			return
+		}
+
 		type APIClaims struct {
 			jwt.StandardClaims
 			AccessToken string `json:"access_token"`
@@ -108,7 +125,7 @@ func api(cli *cli.Context) error {
 			StandardClaims: jwt.StandardClaims{
 				ExpiresAt: identity.ExpiresAt.Unix(),
 				Issuer:    "qitup.ca",
-				Subject:   "id",
+				Subject:   user.ID.Hex(),
 			},
 		}
 
@@ -154,6 +171,10 @@ func api(cli *cli.Context) error {
 
 	party.POST("/", controllers.CreateParty)
 	party.GET("/:join_code", controllers.GetParty)
+
+	me := r.Group("/me")
+
+	me.GET("/", controllers.Me)
 
 	// Listen and Server in 0.0.0.0:8080
 	return r.Run(":8081")

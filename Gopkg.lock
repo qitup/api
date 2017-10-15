@@ -2,6 +2,12 @@
 
 
 [[projects]]
+  branch = "master"
+  name = "github.com/Pallinder/go-randomdata"
+  packages = ["."]
+  revision = "8c3362a5e6781e0d1046f1267b3c1f19b2cde334"
+
+[[projects]]
   name = "github.com/appleboy/gin-jwt"
   packages = ["."]
   revision = "f7347d7c16fc8297bf5b7215b9e4847a5ca05d90"
@@ -172,6 +178,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "d6b32a0b4da4c90a4175f12021cb2a7a713788bb5591b48b6a49c7db79c7effb"
+  inputs-digest = "59da2e42d1b3fd5a894dee1fadbb590fd09eed701f180cef230ac6d0a21140d2"
   solver-name = "gps-cdcl"
   solver-version = 1
