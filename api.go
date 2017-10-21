@@ -18,17 +18,24 @@ import (
 	"time"
 	"github.com/urfave/cli"
 	"dubclan/api/models"
+	"github.com/olahol/melody"
+	"encoding/json"
+	"net/url"
 )
 
 var flags = []cli.Flag{
 	cli.StringFlag{
-		EnvVar: "PUBLIC_HOST",
-		Name:   "public-host",
+		EnvVar: "PUBLIC_HTTP_HOST",
+		Name:   "public-http-host",
+	},
+	cli.StringFlag{
+		EnvVar: "PUBLIC_WS_HOST",
+		Name:   "public-ws-host",
 	},
 	cli.StringFlag{
 		EnvVar: "SESSION_SECRET",
 		Name:   "session-secret",
-		Value: "secret",
+		Value:  "secret",
 	},
 	cli.StringFlag{
 		EnvVar: "SIGNING_KEY",
@@ -45,6 +52,7 @@ var flags = []cli.Flag{
 func before(context *cli.Context) error {
 	key_data := context.String("signing-key")
 
+	// Decode the signing key
 	if key, err := base64.StdEncoding.DecodeString(key_data); err == nil {
 		context.Set("signing-key", string(key))
 	} else {
@@ -55,15 +63,15 @@ func before(context *cli.Context) error {
 }
 
 func api(cli *cli.Context) error {
-	// Disable Console Color
-	// gin.DisableConsoleColor()
 	r := gin.Default()
+	m := melody.New()
 
-	redis, err := sessions.NewRedisStore(10, "tcp", "redis:6379", "", []byte(cli.String("session-secret")))
+	pool := store.GetRedisPool(10, "tcp", "redis:6379", "")
+	redis_store, err := sessions.NewRedisStoreWithPool(pool, []byte(cli.String("session-secret")))
 	if err != nil {
 		panic(err)
 	}
-	gothic.Store = redis
+	gothic.Store = redis_store
 
 	session, err := mgo.Dial("mongodb://mongodb:27017")
 
@@ -78,7 +86,7 @@ func api(cli *cli.Context) error {
 		provider_spotify.New(
 			os.Getenv("SPOTIFY_ID"),
 			os.Getenv("SPOTIFY_SECRET"),
-			cli.String("public-host")+"/auth/spotify/callback",
+			cli.String("public-http-host")+"/auth/spotify/callback",
 			"streaming", "user-library-read",
 		),
 	)
@@ -105,14 +113,14 @@ func api(cli *cli.Context) error {
 	r.GET("/auth/:provider/callback", func(context *gin.Context) {
 		identity, err := gothic.CompleteUserAuth(context.Writer, context.Request)
 		if err != nil {
-			context.Error(err)
+			context.AbortWithError(500, err)
 			return
 		}
 
 		user, err := controllers.CompleteUserAuth(context, models.Identity(identity))
 
 		if err != nil {
-			context.Error(err)
+			context.AbortWithError(500, err)
 			return
 		}
 
@@ -165,12 +173,94 @@ func api(cli *cli.Context) error {
 		}
 	})
 
-	r.Use(auth_middleware.MiddlewareFunc())
-
 	party := r.Group("/party")
 
+	party.GET("/connect/:code", func(context *gin.Context) {
+		conn := pool.Get()
+		defer conn.Close()
+
+		if err := conn.Err(); err != nil {
+			context.AbortWithError(500, err)
+			return
+		}
+
+		connect_token, _ := url.PathUnescape(context.Param("code"))
+
+		// Delete the connect token to ensure single use
+		reply, err := conn.Do("DEL", "jc:"+connect_token)
+
+		if err != nil {
+			context.AbortWithError(500, err)
+			return
+		}
+
+		// Handle the request if the url is valid
+		if reply.(int64) == 1 {
+			m.HandleRequest(context.Writer, context.Request)
+		} else {
+			context.JSON(410, gin.H{
+				"type": "error",
+				"error": gin.H{
+					"code": "url_expired",
+					"msg":  "Socket URL has expired",
+				},
+			})
+		}
+	})
+
+	m.HandleConnect(func(s *melody.Session) {
+		msg, _ := json.Marshal(gin.H{
+			"type": "hello",
+		})
+
+		s.Write([]byte(msg))
+	})
+
+	m.HandleMessage(func(s *melody.Session, data []byte) {
+		var msg map[string]interface{}
+
+		if err := json.Unmarshal(data, &msg); err != nil {
+			error_res, _ := json.Marshal(gin.H{
+				"type": "error",
+				"error": gin.H{
+					"code": "invalid_json",
+					"msg":  "Invalid JSON message",
+				},
+			})
+
+			s.Write([]byte(error_res))
+			return
+		}
+
+		if msg_type, ok := msg["type"]; ok {
+			switch msg_type {
+			case "ping":
+				res, _ := json.Marshal(gin.H{
+					"type": "pong",
+					"time": time.Now().Unix(),
+				})
+
+				s.Write([]byte(res))
+				break
+			}
+		}
+	})
+
+	r.Use(auth_middleware.MiddlewareFunc())
+
 	party.POST("/", controllers.CreateParty)
-	party.GET("/:join_code", controllers.GetParty)
+	//party.GET("/:join_code", controllers.GetParty)
+	party.GET("/join", func(context *gin.Context) {
+		conn := pool.Get()
+		defer conn.Close()
+
+		if err := conn.Err(); err != nil {
+			context.AbortWithError(500, err)
+			return
+		}
+
+		controllers.JoinParty(conn, context, cli)
+	})
 
 	me := r.Group("/me")
 

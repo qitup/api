@@ -86,6 +86,12 @@
   version = "v1.1"
 
 [[projects]]
+  name = "github.com/gorilla/websocket"
+  packages = ["."]
+  revision = "ea4d1f681babbce9545c9c5f3d5194a789c89f5b"
+  version = "v1.2.0"
+
+[[projects]]
   branch = "master"
   name = "github.com/kidstuff/mongostore"
   packages = ["."]
@@ -93,7 +99,7 @@
 
 [[projects]]
   name = "github.com/markbates/goth"
-  packages = ["."]
+  packages = [".","providers/spotify"]
   revision = "6c3a31e5f6aa001e8c3d6cec3f65d5bcc0240e69"
   version = "v1.42.0"
 
@@ -104,9 +110,15 @@
   version = "v0.0.3"
 
 [[projects]]
+  name = "github.com/olahol/melody"
+  packages = ["."]
+  revision = "d521390733761fe1db13de575c253afd5c743085"
+  version = "v1"
+
+[[projects]]
   branch = "master"
   name = "github.com/terev/goth"
-  packages = ["gothic","providers/spotify"]
+  packages = ["gothic"]
   revision = "69abff2836b731854f6e0bd9e1aedf4924f1800a"
 
 [[projects]]
@@ -178,6 +190,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "59da2e42d1b3fd5a894dee1fadbb590fd09eed701f180cef230ac6d0a21140d2"
+  inputs-digest = "5889468b7f41790aeefd335831c15ec4de463d74ded471580bbbb2cf9ce9af5e"
   solver-name = "gps-cdcl"
   solver-version = 1

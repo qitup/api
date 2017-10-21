@@ -4,8 +4,8 @@ import (
 	"dubclan/api/models"
 	"github.com/gin-gonic/gin"
 	"gopkg.in/mgo.v2"
-	"dubclan/api/store"
 	"gopkg.in/mgo.v2/bson"
+	"dubclan/api/store"
 	"github.com/Pallinder/go-randomdata"
 	"errors"
 )
@@ -58,9 +58,9 @@ func Me(context *gin.Context) {
 		if user, err := store.UserByID(mongo, bson.ObjectIdHex(user_id.(string))); err == nil {
 			context.JSON(200, user)
 		} else {
-			context.Error(err)
+			context.AbortWithError(500, err)
 		}
 	} else {
-		context.Error(errors.New("user id is null somehow..."))
+		context.AbortWithError(500, errors.New("user id is nil somehow..."))
 	}
 }
