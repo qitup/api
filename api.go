@@ -173,6 +173,8 @@ func api(cli *cli.Context) error {
 		}
 	})
 
+	r.Use(auth_middleware.MiddlewareFunc())
+
 	party := r.Group("/party")
 
 	party.GET("/connect/:code", func(context *gin.Context) {
@@ -246,9 +248,18 @@ func api(cli *cli.Context) error {
 		}
 	})
 
-	r.Use(auth_middleware.MiddlewareFunc())
+	party.POST("/", func(context *gin.Context) {
+		conn := pool.Get()
+		defer conn.Close()
 
-	party.POST("/", controllers.CreateParty)
+		if err := conn.Err(); err != nil {
+			context.AbortWithError(500, err)
+			return
+		}
+
+		controllers.CreateParty(conn, context, cli)
+	})
+
 	//party.GET("/:join_code", controllers.GetParty)
 	party.GET("/join", func(context *gin.Context) {
 		conn := pool.Get()

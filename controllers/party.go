@@ -10,16 +10,12 @@ import (
 	"dubclan/api/models"
 	"gopkg.in/mgo.v2/bson"
 	"gopkg.in/mgo.v2"
-	"crypto/sha1"
-	"encoding/base64"
 	"github.com/garyburd/redigo/redis"
 	"github.com/urfave/cli"
-	"errors"
 	"net/url"
-	"log"
 )
 
-func CreateParty(context *gin.Context) {
+func CreateParty(redis redis.Conn, context *gin.Context, cli *cli.Context) {
 	mongo := context.MustGet("mongo").(*mgo.Database)
 
 	var data struct {
@@ -32,18 +28,38 @@ func CreateParty(context *gin.Context) {
 	if context.BindJSON(&data) == nil {
 		party := models.NewParty(user_id, data.Name, data.JoinCode)
 
-		log.Printf("%v", party)
-
 		if err := party.Save(mongo); err != nil {
-			context.Error(err)
+			context.AbortWithError(500, err)
 			return
 		}
 
-		context.JSON(200, party)
-		return
-	}
+		me := models.User{
+			ID: bson.ObjectIdHex(context.GetString("userID")),
+		}
 
-	context.Status(400)
+		connect_token, err := party.InitiateJoin(redis, &me)
+
+		switch err {
+		case nil:
+			context.JSON(200, gin.H{
+				"url":   cli.String("public-ws-host") + "/party/connect/" + url.PathEscape(connect_token),
+				"party": party,
+			})
+			return
+		case models.ConnectTokenIssued:
+			context.JSON(403, gin.H{
+				"error": gin.H{
+					"code": "already_issued",
+					"msg":  "Connect token already issued",
+				}})
+			return
+		default:
+			context.AbortWithError(500, err)
+			return
+		}
+	} else {
+		context.Status(400)
+	}
 }
 
 // Create unique join url for user
@@ -61,27 +77,28 @@ func JoinParty(redis redis.Conn, context *gin.Context, cli *cli.Context) {
 		context.Error(err)
 	}
 
-	join_code := context.GetString("userID") + code
-	hasher := sha1.New()
-	hasher.Write([]byte(join_code))
-	sha := base64.URLEncoding.EncodeToString(hasher.Sum(nil))
+	me := models.User{
+		ID: bson.ObjectIdHex(context.GetString("userID")),
+	}
 
-	if reply, err := redis.Do("GET", "jc:"+sha); err != nil {
+	connect_token, err := party.InitiateJoin(redis, &me)
+
+	switch err {
+	case nil:
+		context.JSON(200, gin.H{
+			"url":   cli.String("public-ws-host") + "/party/connect/" + url.PathEscape(connect_token),
+			"party": party,
+		})
+		break
+	case models.ConnectTokenIssued:
+		context.JSON(403, gin.H{
+			"error": gin.H{
+				"code": "already_issued",
+				"msg":  "Connect token already issued",
+			}})
+		break
+	default:
 		context.AbortWithError(500, err)
-	} else if reply == nil {
-		if reply, err := redis.Do("SETEX", "jc:"+sha, 30, 1); err != nil {
-			context.AbortWithError(500, err)
-		} else if reply == "OK" {
-
-			context.JSON(200, gin.H{
-				"url":   cli.String("public-ws-host") + "/party/connect/" + url.PathEscape(sha),
-				"party": party,
-			})
-		} else {
-			context.AbortWithError(500, errors.New("failed setting connect url"))
-		}
-	} else {
-		context.Status(204)
 	}
 }
 
