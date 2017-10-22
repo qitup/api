@@ -48,7 +48,15 @@ func (p *Party) Save(db *mgo.Database) error {
 	return err
 }
 
-func (p *Party) InitiateJoin(redis redis.Conn, me *User) (string, error) {
+func (p *Party) AddAttendee(db *mgo.Database, attendee *User) (error) {
+	err := db.C(party_collection).UpdateId(p.ID,
+		bson.M{
+			"$addToSet": bson.M{"attendee_ids": attendee.ID},
+		})
+	return err
+}
+
+func (p *Party) InitiateConnect(redis redis.Conn, me *User) (string, error) {
 	token := me.ID.Hex() + p.JoinCode
 	hasher := sha1.New()
 	hasher.Write([]byte(token))
@@ -57,7 +65,7 @@ func (p *Party) InitiateJoin(redis redis.Conn, me *User) (string, error) {
 	if reply, err := redis.Do("GET", "jc:"+sha); err != nil {
 		return "", err
 	} else if reply == nil {
-		if reply, err := redis.Do("SETEX", "jc:"+sha, 30, 1); err != nil {
+		if reply, err := redis.Do("SETEX", "jc:"+sha, 30, p.ID.Hex()); err != nil {
 			return "", err
 		} else if reply == "OK" {
 			return sha, nil

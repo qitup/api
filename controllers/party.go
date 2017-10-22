@@ -37,7 +37,7 @@ func CreateParty(redis redis.Conn, context *gin.Context, cli *cli.Context) {
 			ID: bson.ObjectIdHex(context.GetString("userID")),
 		}
 
-		connect_token, err := party.InitiateJoin(redis, &me)
+		connect_token, err := party.InitiateConnect(redis, &me)
 
 		switch err {
 		case nil:
@@ -73,15 +73,30 @@ func JoinParty(redis redis.Conn, context *gin.Context, cli *cli.Context) {
 
 	party, err := models.PartyByCode(mongo, code)
 
-	if err != nil {
-		context.Error(err)
+	if err == mgo.ErrNotFound {
+		context.JSON(400, gin.H{
+			"error": gin.H{
+				"code": "party_not_found",
+				"msg":  "Party not found",
+			},
+		})
+		return
+	} else if err != nil {
+		context.AbortWithError(500, err)
+		return
 	}
 
 	me := models.User{
 		ID: bson.ObjectIdHex(context.GetString("userID")),
 	}
 
-	connect_token, err := party.InitiateJoin(redis, &me)
+	connect_token, err := party.InitiateConnect(redis, &me)
+
+	if me.ID != party.HostID {
+		if err := party.AddAttendee(mongo, &me); err != nil {
+			context.Error(err)
+		}
+	}
 
 	switch err {
 	case nil:

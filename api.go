@@ -21,6 +21,8 @@ import (
 	"github.com/olahol/melody"
 	"encoding/json"
 	"net/url"
+	"github.com/garyburd/redigo/redis"
+	"log"
 )
 
 var flags = []cli.Flag{
@@ -61,6 +63,8 @@ func before(context *cli.Context) error {
 
 	return nil
 }
+
+var PartySessions map[string]map[*melody.Session]*melody.Session = make(map[string]map[*melody.Session]*melody.Session)
 
 func api(cli *cli.Context) error {
 	r := gin.Default()
@@ -165,8 +169,7 @@ func api(cli *cli.Context) error {
 
 	r.GET("/auth/:provider", func(context *gin.Context) {
 		// try to get the user without re-authenticating
-		if user, err := gothic.CompleteUserAuth(context.Writer, context.Request); err == nil {
-			context.Set("user", user)
+		if _, err := gothic.CompleteUserAuth(context.Writer, context.Request); err == nil {
 			context.Next()
 		} else {
 			gothic.BeginAuthHandler(context.Writer, context.Request)
@@ -188,17 +191,30 @@ func api(cli *cli.Context) error {
 
 		connect_token, _ := url.PathUnescape(context.Param("code"))
 
-		// Delete the connect token to ensure single use
-		reply, err := conn.Do("DEL", "jc:"+connect_token)
+		// Delete the connect token and get the party for this session
+		conn.Send("MULTI")
+		conn.Send("GET", "jc:"+connect_token)
+		conn.Send("DEL", "jc:"+connect_token)
+		reply, err := redis.Values(conn.Do("EXEC"))
 
 		if err != nil {
 			context.AbortWithError(500, err)
 			return
 		}
 
+		var party_id string
+		var n_deleted int64
+
+		if _, err := redis.Scan(reply, &party_id, &n_deleted); err != nil {
+			context.AbortWithError(500, err)
+			return
+		}
+
 		// Handle the request if the url is valid
-		if reply.(int64) == 1 {
-			m.HandleRequest(context.Writer, context.Request)
+		if n_deleted == 1 {
+			if err := m.HandleRequestWithKeys(context.Writer, context.Request, gin.H{"party_id": party_id}); err != nil {
+				context.AbortWithError(500, err)
+			}
 		} else {
 			context.JSON(410, gin.H{
 				"type": "error",
@@ -210,12 +226,63 @@ func api(cli *cli.Context) error {
 		}
 	})
 
+	// Add session to the party map
 	m.HandleConnect(func(s *melody.Session) {
+		party_id, _ := s.Get("party_id")
+
+		attendee_count := len(PartySessions[party_id.(string)])
+		log.Println("Connected to party with", attendee_count, "other active attendees")
+
+		// Notify others this attendee has become active
+		if PartySessions[party_id.(string)] != nil {
+			res, _ := json.Marshal(gin.H{
+				"type": "attendee.active",
+				"user": "HI",
+			})
+
+			for _, sess := range PartySessions[party_id.(string)] {
+				if writeErr := sess.Write(res); writeErr != nil {
+					log.Println(writeErr)
+				}
+			}
+		} else {
+			PartySessions[party_id.(string)] = make(map[*melody.Session]*melody.Session)
+		}
+
+		PartySessions[party_id.(string)][s] = s
+
+		// Say hello to the user when they connect
 		msg, _ := json.Marshal(gin.H{
 			"type": "hello",
 		})
 
 		s.Write([]byte(msg))
+	})
+
+	// Cleanup session from the party map
+	m.HandleDisconnect(func(s *melody.Session) {
+		party_id, _ := s.Get("party_id")
+
+		delete(PartySessions[party_id.(string)], s)
+
+		attendee_count := len(PartySessions[party_id.(string)])
+		log.Println("Left party with", attendee_count, "other active attendees")
+
+		if attendee_count == 0 {
+			delete(PartySessions, party_id.(string))
+		} else {
+			// Notify others this attendee has disconnected
+			res, _ := json.Marshal(gin.H{
+				"type": "attendee.offline",
+				"user": "HI",
+			})
+
+			for _, sess := range PartySessions[party_id.(string)] {
+				if writeErr := sess.Write(res); writeErr != nil {
+					log.Println(writeErr)
+				}
+			}
+		}
 	})
 
 	m.HandleMessage(func(s *melody.Session, data []byte) {
@@ -244,7 +311,19 @@ func api(cli *cli.Context) error {
 
 				s.Write([]byte(res))
 				break
+			case "queue.add":
+				break
 			}
+		} else {
+			error_res, _ := json.Marshal(gin.H{
+				"type": "error",
+				"error": gin.H{
+					"code": "invalid_message",
+					"msg":  "Message missing type field",
+				},
+			})
+
+			s.Write([]byte(error_res))
 		}
 	})
 
