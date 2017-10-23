@@ -12,8 +12,8 @@ services:
       - "8081:8081"
 
     environment:
-      PUBLIC_HTTP_HOST: "http://localhost:8081"
-      PUBLIC_WS_HOST: "ws://localhost:8081"
+      PUBLIC_HTTP_HOST: "http://10.0.2.2:8081"
+      PUBLIC_WS_HOST: "ws://10.0.2.2:8081"
       SIGNING_KEY:
       SPOTIFY_ID:
       SPOTIFY_SECRET:

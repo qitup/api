@@ -64,7 +64,12 @@ func before(context *cli.Context) error {
 	return nil
 }
 
-var PartySessions map[string]map[*melody.Session]*melody.Session = make(map[string]map[*melody.Session]*melody.Session)
+var PartySessions map[string]map[*melody.Session]*melody.Session
+//
+//type PartySession struct {
+//	Sessions map[*melody.Session]*melody.Session
+//	Queue models.Queue
+//}
 
 func api(cli *cli.Context) error {
 	r := gin.Default()
@@ -301,6 +306,8 @@ func api(cli *cli.Context) error {
 			return
 		}
 
+		log.Println(msg)
+
 		if msg_type, ok := msg["type"]; ok {
 			switch msg_type {
 			case "ping":
@@ -312,6 +319,8 @@ func api(cli *cli.Context) error {
 				s.Write([]byte(res))
 				break
 			case "queue.add":
+				log.Println(msg)
+
 				break
 			}
 		} else {
