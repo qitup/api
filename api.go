@@ -346,7 +346,7 @@ func api(cli *cli.Context) error {
 
 				if err := party.Queue.Push(conn, party_id.(string), item); err == nil {
 					res, _ := json.Marshal(gin.H{
-						"type": "queue.add",
+						"type": "queue.push",
 						"item": item.Generic(),
 					})
 
