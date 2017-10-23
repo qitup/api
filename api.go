@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"github.com/garyburd/redigo/redis"
 	"log"
+	"github.com/zmb3/spotify"
 )
 
 var flags = []cli.Flag{
@@ -64,12 +65,12 @@ func before(context *cli.Context) error {
 	return nil
 }
 
-var PartySessions map[string]map[*melody.Session]*melody.Session
-//
-//type PartySession struct {
-//	Sessions map[*melody.Session]*melody.Session
-//	Queue models.Queue
-//}
+type PartySession struct {
+	Sessions map[*melody.Session]*melody.Session
+	Queue    *models.Queue
+}
+
+var PartySessions map[string]*PartySession = map[string]*PartySession{}
 
 func api(cli *cli.Context) error {
 	r := gin.Default()
@@ -235,26 +236,31 @@ func api(cli *cli.Context) error {
 	m.HandleConnect(func(s *melody.Session) {
 		party_id, _ := s.Get("party_id")
 
-		attendee_count := len(PartySessions[party_id.(string)])
-		log.Println("Connected to party with", attendee_count, "other active attendees")
-
 		// Notify others this attendee has become active
-		if PartySessions[party_id.(string)] != nil {
+		if party, ok := PartySessions[party_id.(string)]; ok {
+			attendee_count := len(party.Sessions)
+			log.Println("Connected to party with", attendee_count, "other active attendees")
+
 			res, _ := json.Marshal(gin.H{
 				"type": "attendee.active",
 				"user": "HI",
 			})
 
-			for _, sess := range PartySessions[party_id.(string)] {
+			for _, sess := range party.Sessions {
 				if writeErr := sess.Write(res); writeErr != nil {
 					log.Println(writeErr)
 				}
 			}
-		} else {
-			PartySessions[party_id.(string)] = make(map[*melody.Session]*melody.Session)
-		}
 
-		PartySessions[party_id.(string)][s] = s
+			party.Sessions[s] = s
+		} else {
+			log.Println("Connected to party with 0 other active attendees")
+
+			PartySessions[party_id.(string)] = &PartySession{
+				Sessions: map[*melody.Session]*melody.Session{s: s},
+				Queue:    models.NewQueue(),
+			}
+		}
 
 		// Say hello to the user when they connect
 		msg, _ := json.Marshal(gin.H{
@@ -268,23 +274,25 @@ func api(cli *cli.Context) error {
 	m.HandleDisconnect(func(s *melody.Session) {
 		party_id, _ := s.Get("party_id")
 
-		delete(PartySessions[party_id.(string)], s)
+		if party, ok := PartySessions[party_id.(string)]; ok {
+			delete(party.Sessions, s)
 
-		attendee_count := len(PartySessions[party_id.(string)])
-		log.Println("Left party with", attendee_count, "other active attendees")
+			attendee_count := len(party.Sessions)
+			log.Println("Left party with", attendee_count, "other active attendees")
 
-		if attendee_count == 0 {
-			delete(PartySessions, party_id.(string))
-		} else {
-			// Notify others this attendee has disconnected
-			res, _ := json.Marshal(gin.H{
-				"type": "attendee.offline",
-				"user": "HI",
-			})
+			if attendee_count == 0 {
+				delete(PartySessions, party_id.(string))
+			} else {
+				// Notify others this attendee has disconnected
+				res, _ := json.Marshal(gin.H{
+					"type": "attendee.offline",
+					"user": "HI",
+				})
 
-			for _, sess := range PartySessions[party_id.(string)] {
-				if writeErr := sess.Write(res); writeErr != nil {
-					log.Println(writeErr)
+				for _, sess := range party.Sessions {
+					if writeErr := sess.Write(res); writeErr != nil {
+						log.Println(writeErr)
+					}
 				}
 			}
 		}
@@ -306,7 +314,8 @@ func api(cli *cli.Context) error {
 			return
 		}
 
-		log.Println(msg)
+		party_id, _ := s.Get("party_id")
+		party := PartySessions[party_id.(string)]
 
 		if msg_type, ok := msg["type"]; ok {
 			switch msg_type {
@@ -318,9 +327,37 @@ func api(cli *cli.Context) error {
 
 				s.Write([]byte(res))
 				break
-			case "queue.add":
-				log.Println(msg)
+			case "queue.push":
+				conn := pool.Get()
+				defer conn.Close()
 
+				if err := conn.Err(); err != nil {
+					log.Println("Failed opening redis connection", err)
+					return
+				}
+
+				var item *models.BaseItem
+
+				switch(msg["item"].(map[string]interface{})["type"].(string)) {
+				case "spotify_track":
+					item = models.NewSpotifyTrack(spotify.URI(msg["item"].(map[string]interface{})["uri"].(string))).BaseItem
+					break
+				}
+
+				if err := party.Queue.Push(conn, party_id.(string), item); err == nil {
+					res, _ := json.Marshal(gin.H{
+						"type": "queue.add",
+						"item": item.Generic(),
+					})
+
+					for _, sess := range party.Sessions {
+						if writeErr := sess.Write(res); writeErr != nil {
+							log.Println(writeErr)
+						}
+					}
+				}
+				break
+			case "queue.pop":
 				break
 			}
 		} else {

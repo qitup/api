@@ -10,36 +10,18 @@ type Queue struct {
 	Items []*BaseItem `json:"items" bson:"items"`
 }
 
-type BaseItem struct {
-	ItemType string `json:"item_type" bson:"item_type"`
-}
-
-func (i *BaseItem) Serialize() (string, error) {
-	serialized, err := json.Marshal(i)
-
-	return string(serialized), err
-}
-
-//func (i *BaseItem) Deserialize() (BaseItem, error) {
-//	serialized, err := json.Unmarshal(i)
-//
-//	return string(serialized), err
-//}
-
-type SpotifyTrack struct {
-	BaseItem
-	spotify.URI `json:"uri" bson:"uri"`
+func NewQueue() *Queue {
+	return &Queue{
+		Items: []*BaseItem{},
+	}
 }
 
 func (q *Queue) Push(redis redis.Conn, party string, item *BaseItem) error {
 	if serialized, err := item.Serialize(); err == nil {
-		if _, err := redis.Do("LPUSH", party, serialized); err == nil {
-			return nil
-		} else {
-			return err
-		}
+		_, err := redis.Do("LPUSH", party, serialized)
+		return err
 	} else {
-		return nil
+		return err
 	}
 }
 
@@ -54,3 +36,48 @@ func (q *Queue) Push(redis redis.Conn, party string, item *BaseItem) error {
 //		return err
 //	}
 //}
+
+type ItemType interface {
+	Generic() (interface{})
+	Serialize() (string, error)
+}
+
+type BaseItem struct {
+	baseitem ItemType
+}
+
+func (i *BaseItem) Serialize() (string, error) {
+	return i.baseitem.Serialize()
+}
+
+func (i *BaseItem) Generic() (interface{}) {
+	return i.baseitem.Generic()
+}
+
+//func (i *BaseItem) Deserialize() (BaseItem, error) {
+//	serialized, err := json.Unmarshal(i)
+//
+//	return string(serialized), err
+//}
+
+type SpotifyTrack struct {
+	*BaseItem
+	URI spotify.URI `json:"uri" bson:"uri"`
+}
+
+func NewSpotifyTrack(uri spotify.URI) *SpotifyTrack {
+	track := &SpotifyTrack{&BaseItem{nil}, uri}
+	track.baseitem = track
+
+	return track
+}
+
+func (i *SpotifyTrack) Serialize() (string, error) {
+	serialized, err := json.Marshal(i)
+
+	return string(serialized), err
+}
+
+func (i *SpotifyTrack) Generic() (interface{}) {
+	return i
+}
