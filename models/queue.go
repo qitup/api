@@ -4,6 +4,8 @@ import (
 	"github.com/zmb3/spotify"
 	"github.com/garyburd/redigo/redis"
 	"encoding/json"
+	"gopkg.in/mgo.v2/bson"
+	"errors"
 )
 
 type Queue struct {
@@ -16,8 +18,8 @@ func NewQueue() *Queue {
 	}
 }
 
-func (q *Queue) Push(redis redis.Conn, party string, item *BaseItem) error {
-	if serialized, err := item.Serialize(); err == nil {
+func (q *Queue) Push(redis redis.Conn, party string, item BaseItem) error {
+	if serialized, err := json.Marshal(item); err == nil {
 		_, err := redis.Do("LPUSH", party, serialized)
 		return err
 	} else {
@@ -37,47 +39,43 @@ func (q *Queue) Push(redis redis.Conn, party string, item *BaseItem) error {
 //	}
 //}
 
-type ItemType interface {
-	Generic() (interface{})
-	Serialize() (string, error)
+type Item interface {
 }
 
 type BaseItem struct {
-	baseitem ItemType
+	Item    Item          `json:"item" bson:"item"`
+	AddedBy bson.ObjectId `json:"added_by" bson:"added_by"`
 }
 
-func (i *BaseItem) Serialize() (string, error) {
-	return i.baseitem.Serialize()
-}
+func (i *BaseItem) UnmarshalJSON(b []byte) error {
+	var m map[string]string
 
-func (i *BaseItem) Generic() (interface{}) {
-	return i.baseitem.Generic()
-}
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
 
-//func (i *BaseItem) Deserialize() (BaseItem, error) {
-//	serialized, err := json.Unmarshal(i)
-//
-//	return string(serialized), err
-//}
+	switch m["type"] {
+	case "spotify_track":
+		var item SpotifyTrack
+		if err := json.Unmarshal(b, &item); err != nil {
+			return err
+		}
+		i.Item = &item
+		break
+	default:
+		return errors.New("invalid item type")
+	}
+
+	return nil
+}
 
 type SpotifyTrack struct {
-	*BaseItem
 	URI spotify.URI `json:"uri" bson:"uri"`
 }
 
-func NewSpotifyTrack(uri spotify.URI) *SpotifyTrack {
-	track := &SpotifyTrack{&BaseItem{nil}, uri}
-	track.baseitem = track
-
-	return track
-}
-
-func (i *SpotifyTrack) Serialize() (string, error) {
-	serialized, err := json.Marshal(i)
-
-	return string(serialized), err
-}
-
-func (i *SpotifyTrack) Generic() (interface{}) {
-	return i
+func (t *SpotifyTrack) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]string{
+		"type": "spotify_track",
+		"uri":  string(t.URI),
+	})
 }

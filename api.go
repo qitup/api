@@ -23,7 +23,7 @@ import (
 	"net/url"
 	"github.com/garyburd/redigo/redis"
 	"log"
-	"github.com/zmb3/spotify"
+	"gopkg.in/mgo.v2/bson"
 )
 
 var flags = []cli.Flag{
@@ -218,7 +218,10 @@ func api(cli *cli.Context) error {
 
 		// Handle the request if the url is valid
 		if n_deleted == 1 {
-			if err := m.HandleRequestWithKeys(context.Writer, context.Request, gin.H{"party_id": party_id}); err != nil {
+			if err := m.HandleRequestWithKeys(context.Writer, context.Request, gin.H{
+				"party_id": party_id,
+				"user_id":  context.GetString("userID"),
+			}); err != nil {
 				context.AbortWithError(500, err)
 			}
 		} else {
@@ -299,7 +302,7 @@ func api(cli *cli.Context) error {
 	})
 
 	m.HandleMessage(func(s *melody.Session, data []byte) {
-		var msg map[string]interface{}
+		var msg map[string]*json.RawMessage
 
 		if err := json.Unmarshal(data, &msg); err != nil {
 			error_res, _ := json.Marshal(gin.H{
@@ -314,10 +317,18 @@ func api(cli *cli.Context) error {
 			return
 		}
 
-		party_id, _ := s.Get("party_id")
+		party_id := s.MustGet("party_id")
 		party := PartySessions[party_id.(string)]
 
-		if msg_type, ok := msg["type"]; ok {
+		user_id := s.MustGet("user_id").(string)
+
+		if raw, ok := msg["type"]; ok {
+			var msg_type string
+			if err := json.Unmarshal(*raw, &msg_type); err != nil {
+				log.Println(err)
+				return
+			}
+
 			switch msg_type {
 			case "ping":
 				res, _ := json.Marshal(gin.H{
@@ -336,19 +347,30 @@ func api(cli *cli.Context) error {
 					return
 				}
 
-				var item *models.BaseItem
+				var item models.BaseItem
 
-				switch(msg["item"].(map[string]interface{})["type"].(string)) {
-				case "spotify_track":
-					item = models.NewSpotifyTrack(spotify.URI(msg["item"].(map[string]interface{})["uri"].(string))).BaseItem
-					break
+				if err := json.Unmarshal(*msg["item"], &item); err != nil {
+					error_res, _ := json.Marshal(gin.H{
+						"type": "error",
+						"error": gin.H{
+							"code": "invalid_json",
+							"msg":  "Invalid JSON message",
+						},
+					})
+
+					s.Write([]byte(error_res))
+					return
 				}
 
+				item.AddedBy = bson.ObjectIdHex(user_id)
+
 				if err := party.Queue.Push(conn, party_id.(string), item); err == nil {
-					res, _ := json.Marshal(gin.H{
-						"type": "queue.push",
-						"item": item.Generic(),
-					})
+					res, err := json.Marshal(item)
+
+					if err != nil {
+						log.Println(err)
+						return
+					}
 
 					for _, sess := range party.Sessions {
 						if writeErr := sess.Write(res); writeErr != nil {
@@ -357,7 +379,7 @@ func api(cli *cli.Context) error {
 					}
 				}
 				break
-			case "queue.pop":
+			case "item.finished":
 				break
 			}
 		} else {
