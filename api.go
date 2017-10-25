@@ -365,7 +365,10 @@ func api(cli *cli.Context) error {
 				item.AddedBy = bson.ObjectIdHex(user_id)
 
 				if err := party.Queue.Push(conn, party_id.(string), item); err == nil {
-					res, err := json.Marshal(item)
+					res, err := json.Marshal(gin.H{
+						"item": item,
+						"type": msg_type,
+					})
 
 					if err != nil {
 						log.Println(err)
