@@ -24,6 +24,7 @@ import (
 	"github.com/garyburd/redigo/redis"
 	"log"
 	"gopkg.in/mgo.v2/bson"
+	"dubclan/api/party"
 )
 
 var flags = []cli.Flag{
@@ -65,12 +66,7 @@ func before(context *cli.Context) error {
 	return nil
 }
 
-type PartySession struct {
-	Sessions map[*melody.Session]*melody.Session
-	Queue    *models.Queue
-}
-
-var PartySessions map[string]*PartySession = map[string]*PartySession{}
+var PartySessions map[string]*party.Session = map[string]*party.Session{}
 
 func api(cli *cli.Context) error {
 	r := gin.Default()
@@ -184,9 +180,35 @@ func api(cli *cli.Context) error {
 
 	r.Use(auth_middleware.MiddlewareFunc())
 
-	party := r.Group("/party")
+	party_group := r.Group("/party")
 
-	party.GET("/connect/:code", func(context *gin.Context) {
+	// Party creation route
+	party_group.POST("/", func(context *gin.Context) {
+		conn := pool.Get()
+		defer conn.Close()
+
+		if err := conn.Err(); err != nil {
+			context.AbortWithError(500, err)
+			return
+		}
+
+		controllers.CreateParty(conn, context, cli)
+	})
+
+	//
+	party_group.GET("/join", func(context *gin.Context) {
+		conn := pool.Get()
+		defer conn.Close()
+
+		if err := conn.Err(); err != nil {
+			context.AbortWithError(500, err)
+			return
+		}
+
+		controllers.JoinParty(conn, context, cli)
+	})
+
+	party_group.GET("/connect/:code", func(context *gin.Context) {
 		conn := pool.Get()
 		defer conn.Close()
 
@@ -237,11 +259,18 @@ func api(cli *cli.Context) error {
 
 	// Add session to the party map
 	m.HandleConnect(func(s *melody.Session) {
+		conn := pool.Get()
+		defer conn.Close()
+
+		if err := conn.Err(); err != nil {
+			return
+		}
+
 		party_id, _ := s.Get("party_id")
 
 		// Notify others this attendee has become active
-		if party, ok := PartySessions[party_id.(string)]; ok {
-			attendee_count := len(party.Sessions)
+		if session, ok := PartySessions[party_id.(string)]; ok {
+			attendee_count := len(session.Sessions)
 			log.Println("Connected to party with", attendee_count, "other active attendees")
 
 			res, _ := json.Marshal(gin.H{
@@ -249,19 +278,21 @@ func api(cli *cli.Context) error {
 				"user": "HI",
 			})
 
-			for _, sess := range party.Sessions {
+			for _, sess := range session.Sessions {
 				if writeErr := sess.Write(res); writeErr != nil {
 					log.Println(writeErr)
 				}
 			}
 
-			party.Sessions[s] = s
+			session.Sessions[s] = s
 		} else {
 			log.Println("Connected to party with 0 other active attendees")
 
-			PartySessions[party_id.(string)] = &PartySession{
-				Sessions: map[*melody.Session]*melody.Session{s: s},
-				Queue:    models.NewQueue(),
+			if queue, err := party.TryResumeQueue(conn, party_id.(string)); err == nil {
+				PartySessions[party_id.(string)] = &party.Session{
+					Sessions: map[*melody.Session]*melody.Session{s: s},
+					Queue:    queue,
+				}
 			}
 		}
 
@@ -277,11 +308,11 @@ func api(cli *cli.Context) error {
 	m.HandleDisconnect(func(s *melody.Session) {
 		party_id, _ := s.Get("party_id")
 
-		if party, ok := PartySessions[party_id.(string)]; ok {
-			delete(party.Sessions, s)
+		if session, ok := PartySessions[party_id.(string)]; ok {
+			delete(session.Sessions, s)
 
-			attendee_count := len(party.Sessions)
-			log.Println("Left party with", attendee_count, "other active attendees")
+			attendee_count := len(session.Sessions)
+			log.Println("Left session with", attendee_count, "other active attendees")
 
 			if attendee_count == 0 {
 				delete(PartySessions, party_id.(string))
@@ -292,7 +323,7 @@ func api(cli *cli.Context) error {
 					"user": "HI",
 				})
 
-				for _, sess := range party.Sessions {
+				for _, sess := range session.Sessions {
 					if writeErr := sess.Write(res); writeErr != nil {
 						log.Println(writeErr)
 					}
@@ -318,7 +349,7 @@ func api(cli *cli.Context) error {
 		}
 
 		party_id := s.MustGet("party_id")
-		party := PartySessions[party_id.(string)]
+		session := PartySessions[party_id.(string)]
 
 		user_id := s.MustGet("user_id").(string)
 
@@ -347,9 +378,9 @@ func api(cli *cli.Context) error {
 					return
 				}
 
-				var item models.BaseItem
+				item, err := party.UnmarshalItem(*msg["item"])
 
-				if err := json.Unmarshal(*msg["item"], &item); err != nil {
+				if err != nil {
 					error_res, _ := json.Marshal(gin.H{
 						"type": "error",
 						"error": gin.H{
@@ -362,11 +393,11 @@ func api(cli *cli.Context) error {
 					return
 				}
 
-				item.AddedBy = bson.ObjectIdHex(user_id)
+				item.Added(bson.ObjectIdHex(user_id))
 
-				if err := party.Queue.Push(conn, party_id.(string), item); err == nil {
-					res, err := json.Marshal(gin.H{
-						"added": item,
+				if err := session.Queue.Push(conn, party_id.(string), item); err == nil {
+					event, err := json.Marshal(gin.H{
+						"item": item,
 						"type": msg_type,
 					})
 
@@ -375,8 +406,8 @@ func api(cli *cli.Context) error {
 						return
 					}
 
-					for _, sess := range party.Sessions {
-						if writeErr := sess.Write(res); writeErr != nil {
+					for _, sess := range session.Sessions {
+						if writeErr := sess.Write(event); writeErr != nil {
 							log.Println(writeErr)
 						}
 					}
@@ -396,31 +427,6 @@ func api(cli *cli.Context) error {
 
 			s.Write([]byte(error_res))
 		}
-	})
-
-	party.POST("/", func(context *gin.Context) {
-		conn := pool.Get()
-		defer conn.Close()
-
-		if err := conn.Err(); err != nil {
-			context.AbortWithError(500, err)
-			return
-		}
-
-		controllers.CreateParty(conn, context, cli)
-	})
-
-	//party.GET("/:join_code", controllers.GetParty)
-	party.GET("/join", func(context *gin.Context) {
-		conn := pool.Get()
-		defer conn.Close()
-
-		if err := conn.Err(); err != nil {
-			context.AbortWithError(500, err)
-			return
-		}
-
-		controllers.JoinParty(conn, context, cli)
 	})
 
 	me := r.Group("/me")

@@ -33,11 +33,9 @@ func CreateParty(redis redis.Conn, context *gin.Context, cli *cli.Context) {
 			return
 		}
 
-		me := models.User{
-			ID: bson.ObjectIdHex(context.GetString("userID")),
-		}
+		attendee := models.NewAttendee(bson.ObjectIdHex(context.GetString("userID")))
 
-		connect_token, err := party.InitiateConnect(redis, &me)
+		connect_token, err := party.InitiateConnect(redis, &attendee)
 
 		switch err {
 		case nil:
@@ -66,7 +64,7 @@ func CreateParty(redis redis.Conn, context *gin.Context, cli *cli.Context) {
 //		join_token: sha2(user_id + join_code)
 // set key in redis with 30 sec ttl
 // 		SETEX join_token 30
-func JoinParty(redis redis.Conn, context *gin.Context, cli *cli.Context) {
+func JoinParty(redis redis.Conn, context *gin.Context, cli *cli.Context, ) {
 	mongo := context.MustGet("mongo").(*mgo.Database)
 
 	code := context.Query("code")
@@ -86,14 +84,12 @@ func JoinParty(redis redis.Conn, context *gin.Context, cli *cli.Context) {
 		return
 	}
 
-	me := models.User{
-		ID: bson.ObjectIdHex(context.GetString("userID")),
-	}
+	attendee := models.NewAttendee(bson.ObjectIdHex(context.GetString("userID")))
 
-	connect_token, err := party.InitiateConnect(redis, &me)
+	connect_token, err := party.InitiateConnect(redis, &attendee)
 
-	if me.ID != party.HostID {
-		if err := party.AddAttendee(mongo, &me); err != nil {
+	if attendee.UserId != party.HostID {
+		if err := party.AddAttendee(mongo, &attendee); err != nil {
 			context.Error(err)
 		}
 	}
