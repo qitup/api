@@ -52,6 +52,12 @@ func (q *Queue) Push(redis redis.Conn, party string, item Item) error {
 	}
 }
 
+//func (q *Queue) HasItem(cmp Item) (bool, error) {
+//	for _, item := range q.Items {
+//		if cmp.
+//	}
+//}
+
 //func (q *Queue) Pop(redis redis.Conn, party string, item *BaseItem) error {
 //	if item, err := redis.Do("RPOP", party); err == nil {
 //		if serialized, err := item.Deserialize(); err == nil {

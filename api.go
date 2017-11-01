@@ -11,7 +11,6 @@ import (
 	"github.com/terev/goth/gothic"
 	"os"
 	"strings"
-	"encoding/base64"
 	"github.com/gin-contrib/sessions"
 	"gopkg.in/dgrijalva/jwt-go.v3"
 	jwt_middleware "github.com/appleboy/gin-jwt"
@@ -26,45 +25,6 @@ import (
 	"gopkg.in/mgo.v2/bson"
 	"dubclan/api/party"
 )
-
-var flags = []cli.Flag{
-	cli.StringFlag{
-		EnvVar: "PUBLIC_HTTP_HOST",
-		Name:   "public-http-host",
-	},
-	cli.StringFlag{
-		EnvVar: "PUBLIC_WS_HOST",
-		Name:   "public-ws-host",
-	},
-	cli.StringFlag{
-		EnvVar: "SESSION_SECRET",
-		Name:   "session-secret",
-		Value:  "secret",
-	},
-	cli.StringFlag{
-		EnvVar: "SIGNING_KEY",
-		Name:   "signing-key",
-		Usage:  "signing key",
-	},
-	cli.StringFlag{
-		EnvVar: "DATABASE",
-		Name:   "database",
-		Value:  "dev",
-	},
-}
-
-func before(context *cli.Context) error {
-	key_data := context.String("signing-key")
-
-	// Decode the signing key
-	if key, err := base64.StdEncoding.DecodeString(key_data); err == nil {
-		context.Set("signing-key", string(key))
-	} else {
-		return err
-	}
-
-	return nil
-}
 
 var PartySessions map[string]*party.Session = map[string]*party.Session{}
 
@@ -93,7 +53,7 @@ func api(cli *cli.Context) error {
 			os.Getenv("SPOTIFY_ID"),
 			os.Getenv("SPOTIFY_SECRET"),
 			cli.String("public-http-host")+"/auth/spotify/callback",
-			"streaming", "user-library-read",
+			"streaming", "user-library-read", "user-read-private", "user-read-playback-state", "user-modify-playback-state", "user-read-currently-playing",
 		),
 	)
 
@@ -195,7 +155,6 @@ func api(cli *cli.Context) error {
 		controllers.CreateParty(conn, context, cli)
 	})
 
-	//
 	party_group.GET("/join", func(context *gin.Context) {
 		conn := pool.Get()
 		defer conn.Close()
@@ -205,7 +164,7 @@ func api(cli *cli.Context) error {
 			return
 		}
 
-		controllers.JoinParty(conn, context, cli)
+		controllers.JoinParty(conn, context, cli, PartySessions)
 	})
 
 	party_group.GET("/connect/:code", func(context *gin.Context) {
