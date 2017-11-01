@@ -41,7 +41,7 @@ func CreateParty(redis redis.Conn, context *gin.Context, cli *cli.Context) {
 		switch err {
 		case nil:
 			context.JSON(201, gin.H{
-				"url":   cli.String("public-ws-host") + "/party_record/connect/" + url.PathEscape(connect_token),
+				"url":   cli.String("public-ws-host") + "/party/connect/" + url.PathEscape(connect_token),
 				"party": party_record,
 				"queue": []interface{}{},
 			})
@@ -99,7 +99,7 @@ func JoinParty(redis redis.Conn, context *gin.Context, cli *cli.Context, party_s
 	switch err {
 	case nil:
 		res := gin.H{
-			"url":   cli.String("public-ws-host") + "/party_record/connect/" + url.PathEscape(connect_token),
+			"url":   cli.String("public-ws-host") + "/party/connect/" + url.PathEscape(connect_token),
 			"party": party_record,
 		}
 
