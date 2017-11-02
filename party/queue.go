@@ -24,8 +24,8 @@ func TryResumeQueue(conn redis.Conn, party string) (*Queue, error) {
 	if list, err := redis.Strings(conn.Do("LRANGE", PARTY_PREFIX+party, 0, -1)); err == nil {
 		queue := NewQueue()
 
-		for _, item_data := range list {
-			if item, err := UnmarshalItem([]byte(item_data)); err == nil {
+		for i := len(list) - 1; i >= 0; i-- {
+			if item, err := UnmarshalItem([]byte(list[i])); err == nil {
 				queue.Items = append(queue.Items, item)
 			} else {
 				log.Println(err)
