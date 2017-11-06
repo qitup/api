@@ -12,8 +12,9 @@ services:
       - "8081:8081"
 
     environment:
-      PUBLIC_HTTP_HOST: "http://10.0.2.2:8081"
-      PUBLIC_WS_HOST: "ws://10.0.2.2:8081"
+      PORT: "8081"
+      SECURED: "false"
+      HOST: "localhost"
       SIGNING_KEY:
       SPOTIFY_ID:
       SPOTIFY_SECRET:

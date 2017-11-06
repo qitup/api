@@ -9,7 +9,6 @@ import (
 	provider_spotify "github.com/markbates/goth/providers/spotify"
 	"github.com/markbates/goth"
 	"github.com/terev/goth/gothic"
-	"os"
 	"strings"
 	"github.com/gin-contrib/sessions"
 	"gopkg.in/dgrijalva/jwt-go.v3"
@@ -20,17 +19,28 @@ import (
 	"github.com/olahol/melody"
 	"encoding/json"
 	"net/url"
-	"github.com/garyburd/redigo/redis"
 	"log"
 	"gopkg.in/mgo.v2/bson"
 	"dubclan/api/party"
+	"encoding/base64"
 )
 
-var PartySessions map[string]*party.Session = map[string]*party.Session{}
-
 func api(cli *cli.Context) error {
+	var signing_key []byte
+
+	key_data := cli.String("signing-key")
+
+	// Decode the signing key
+	if key, err := base64.StdEncoding.DecodeString(key_data); err == nil {
+		signing_key = key
+	} else {
+		return err
+	}
+
 	r := gin.Default()
 	m := melody.New()
+
+	PartySessions := map[string]*party.Session{}
 
 	pool := store.GetRedisPool(10, "tcp", "redis:6379", "")
 	redis_store, err := sessions.NewRedisStoreWithPool(pool, []byte(cli.String("session-secret")))
@@ -44,15 +54,25 @@ func api(cli *cli.Context) error {
 	if err != nil {
 		panic(err)
 	}
+
+	index := mgo.Index{
+		Key:    []string{"join_code"},
+		Unique: true,
+	}
+	err = session.DB(cli.String("database")).C(models.PARTY_COLLECTION).EnsureIndex(index)
+	if err != nil {
+		panic(err)
+	}
+
 	defer session.Close()
 
 	r.Use(store.Middleware(session, cli))
 
 	goth.UseProviders(
 		provider_spotify.New(
-			os.Getenv("SPOTIFY_ID"),
-			os.Getenv("SPOTIFY_SECRET"),
-			cli.String("public-http-host")+"/auth/spotify/callback",
+			cli.String("spotify-id"),
+			cli.String("spotify-secret"),
+			"http://"+cli.String("host")+":"+cli.String("port")+"/auth/spotify/callback",
 			"streaming", "user-library-read", "user-read-private", "user-read-playback-state", "user-modify-playback-state", "user-read-currently-playing",
 		),
 	)
@@ -65,7 +85,7 @@ func api(cli *cli.Context) error {
 
 	auth_middleware := &jwt_middleware.GinJWTMiddleware{
 		Realm:      "api",
-		Key:        []byte(cli.String("signing-key")),
+		Key:        signing_key,
 		Timeout:    time.Hour,
 		MaxRefresh: time.Hour,
 
@@ -110,7 +130,7 @@ func api(cli *cli.Context) error {
 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
 		// Sign and get the complete encoded token as a string using the secret
-		token_blob, err := token.SignedString([]byte(cli.String("signing-key")))
+		token_blob, err := token.SignedString(signing_key)
 
 		if err != nil {
 			context.Error(err)
@@ -178,27 +198,8 @@ func api(cli *cli.Context) error {
 
 		connect_token, _ := url.PathUnescape(context.Param("code"))
 
-		// Delete the connect token and get the party for this session
-		conn.Send("MULTI")
-		conn.Send("GET", "jc:"+connect_token)
-		conn.Send("DEL", "jc:"+connect_token)
-		reply, err := redis.Values(conn.Do("EXEC"))
-
-		if err != nil {
-			context.AbortWithError(500, err)
-			return
-		}
-
-		var party_id string
-		var n_deleted int64
-
-		if _, err := redis.Scan(reply, &party_id, &n_deleted); err != nil {
-			context.AbortWithError(500, err)
-			return
-		}
-
 		// Handle the request if the url is valid
-		if n_deleted == 1 {
+		if success, party_id, err := party.FinishConnect(conn, connect_token); success && err == nil {
 			if err := m.HandleRequestWithKeys(context.Writer, context.Request, gin.H{
 				"party_id": party_id,
 				"user_id":  context.GetString("userID"),
@@ -234,7 +235,7 @@ func api(cli *cli.Context) error {
 
 			res, _ := json.Marshal(gin.H{
 				"type": "attendee.active",
-				"user": "HI",
+				"user": s.MustGet("user_id"),
 			})
 
 			for _, sess := range session.Sessions {
@@ -279,7 +280,7 @@ func api(cli *cli.Context) error {
 				// Notify others this attendee has disconnected
 				res, _ := json.Marshal(gin.H{
 					"type": "attendee.offline",
-					"user": "HI",
+					"user": s.MustGet("user_id"),
 				})
 
 				for _, sess := range session.Sessions {
@@ -392,6 +393,5 @@ func api(cli *cli.Context) error {
 
 	me.GET("/", controllers.Me)
 
-	// Listen and Server in 0.0.0.0:8080
-	return r.Run(":8081")
+	return r.Run(":" + cli.String("port"))
 }

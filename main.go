@@ -4,17 +4,20 @@ import (
 	"os"
 	"github.com/urfave/cli"
 	"fmt"
-	"encoding/base64"
 )
 
 var flags = []cli.Flag{
 	cli.StringFlag{
-		EnvVar: "PUBLIC_HTTP_HOST",
-		Name:   "public-http-host",
+		EnvVar: "HOST",
+		Name:   "host",
+	},
+	cli.BoolFlag{
+		EnvVar: "SECURED",
+		Name:   "secured",
 	},
 	cli.StringFlag{
-		EnvVar: "PUBLIC_WS_HOST",
-		Name:   "public-ws-host",
+		EnvVar: "PORT",
+		Name:   "port",
 	},
 	cli.StringFlag{
 		EnvVar: "SESSION_SECRET",
@@ -31,19 +34,14 @@ var flags = []cli.Flag{
 		Name:   "database",
 		Value:  "dev",
 	},
-}
-
-func before(context *cli.Context) error {
-	key_data := context.String("signing-key")
-
-	// Decode the signing key
-	if key, err := base64.StdEncoding.DecodeString(key_data); err == nil {
-		context.Set("signing-key", string(key))
-	} else {
-		return err
-	}
-
-	return nil
+	cli.StringFlag{
+		EnvVar: "SPOTIFY_ID",
+		Name:   "spotify-id",
+	},
+	cli.StringFlag{
+		EnvVar: "SPOTIFY_SECRET",
+		Name:   "spotify-secret",
+	},
 }
 
 func main() {
@@ -51,7 +49,6 @@ func main() {
 	app.Name = "qitup-api"
 	app.Action = api
 	app.Flags = flags
-	app.Before = before
 
 	if err := app.Run(os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, err)

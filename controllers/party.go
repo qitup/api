@@ -29,24 +29,32 @@ func CreateParty(redis redis.Conn, context *gin.Context, cli *cli.Context) {
 	if context.BindJSON(&data) == nil {
 		party_record := models.NewParty(user_id, data.Name, data.JoinCode)
 
-		if err := party_record.Save(mongo); err != nil {
+		err := party_record.Insert(mongo)
+
+		if mgo.IsDup(err) {
+			context.JSON(400, gin.H{
+				"code": "duplicate_party",
+				"msg":  "There is an active party with the same join code",
+			})
+			return
+		} else if err != nil {
 			context.AbortWithError(500, err)
 			return
 		}
 
 		attendee := models.NewAttendee(bson.ObjectIdHex(context.GetString("userID")))
 
-		connect_token, err := party_record.InitiateConnect(redis, &attendee)
+		connect_token, err := party.InitiateConnect(redis, party_record, attendee)
 
 		switch err {
 		case nil:
 			context.JSON(201, gin.H{
-				"url":   cli.String("public-ws-host") + "/party/connect/" + url.PathEscape(connect_token),
+				"url":   "ws://" + cli.String("host") + ":" + cli.String("port") + "/party/connect/" + url.PathEscape(connect_token),
 				"party": party_record,
 				"queue": party.NewQueue(),
 			})
 			return
-		case models.ConnectTokenIssued:
+		case party.ConnectTokenIssued:
 			context.JSON(403, gin.H{
 				"error": gin.H{
 					"code": "already_issued",
@@ -88,7 +96,7 @@ func JoinParty(redis redis.Conn, context *gin.Context, cli *cli.Context, party_s
 
 	attendee := models.NewAttendee(bson.ObjectIdHex(context.GetString("userID")))
 
-	connect_token, err := party_record.InitiateConnect(redis, &attendee)
+	connect_token, err := party.InitiateConnect(redis, *party_record, attendee)
 
 	if attendee.UserId != party_record.HostID {
 		if err := party_record.AddAttendee(mongo, &attendee); err != nil {
@@ -99,7 +107,7 @@ func JoinParty(redis redis.Conn, context *gin.Context, cli *cli.Context, party_s
 	switch err {
 	case nil:
 		res := gin.H{
-			"url":   cli.String("public-ws-host") + "/party/connect/" + url.PathEscape(connect_token),
+			"url":   "ws://" + cli.String("host") + ":" + cli.String("port") + "/party/connect/" + url.PathEscape(connect_token),
 			"party": party_record,
 		}
 
@@ -112,7 +120,7 @@ func JoinParty(redis redis.Conn, context *gin.Context, cli *cli.Context, party_s
 
 		context.JSON(200, res)
 		break
-	case models.ConnectTokenIssued:
+	case party.ConnectTokenIssued:
 		context.JSON(403, gin.H{
 			"error": gin.H{
 				"code": "already_issued",

@@ -6,10 +6,6 @@ import (
 	"log"
 )
 
-const (
-	PARTY_PREFIX = "p:"
-)
-
 type Queue struct {
 	Items []Item `json:"items" bson:"items"`
 }
