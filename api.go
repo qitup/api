@@ -23,6 +23,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 	"dubclan/api/party"
 	"encoding/base64"
+	"dubclan/api/players"
 )
 
 func api(cli *cli.Context) error {
@@ -373,7 +374,17 @@ func api(cli *cli.Context) error {
 					}
 				}
 				break
-			case "item.finished":
+			case "player.event":
+				var event player.Event
+				err := json.Unmarshal(*msg["event"], &event)
+
+				res, _ := json.Marshal(event)
+				if err == nil {
+					log.Println(string(res))
+				} else {
+					log.Fatalln(err)
+				}
+
 				break
 			}
 		} else {
