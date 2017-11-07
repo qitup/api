@@ -40,6 +40,7 @@ func api(cli *cli.Context) error {
 
 	r := gin.Default()
 	m := melody.New()
+	m.Config.MaxMessageSize = 8192
 
 	PartySessions := map[string]*party.Session{}
 
@@ -69,11 +70,18 @@ func api(cli *cli.Context) error {
 
 	r.Use(store.Middleware(session, cli))
 
+	var http_protocol string
+	if cli.Bool("secured") {
+		http_protocol = "https"
+	} else {
+		http_protocol = "http"
+	}
+
 	goth.UseProviders(
 		provider_spotify.New(
 			cli.String("spotify-id"),
 			cli.String("spotify-secret"),
-			"http://"+cli.String("host")+":"+cli.String("port")+"/auth/spotify/callback",
+			http_protocol+"://"+cli.String("host")+":"+cli.String("port")+"/auth/spotify/callback",
 			"streaming", "user-library-read", "user-read-private", "user-read-playback-state", "user-modify-playback-state", "user-read-currently-playing",
 		),
 	)
@@ -378,11 +386,10 @@ func api(cli *cli.Context) error {
 				var event player.Event
 				err := json.Unmarshal(*msg["event"], &event)
 
-				res, _ := json.Marshal(event)
 				if err == nil {
-					log.Println(string(res))
+					log.Println(event)
 				} else {
-					log.Fatalln(err)
+					log.Println(err)
 				}
 
 				break
