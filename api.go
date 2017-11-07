@@ -31,6 +31,7 @@ func SecureHeaders(cli *cli.Context) gin.HandlerFunc {
 	secureMiddleware := secure.New(secure.Options{
 		IsDevelopment: cli.String("mode") == "debug" || cli.String("mode") == "test",
 
+		STSSeconds:            315360000,
 		STSIncludeSubdomains:  true,
 		STSPreload:            true,
 		FrameDeny:             true,
