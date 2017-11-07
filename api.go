@@ -56,6 +56,7 @@ func api(cli *cli.Context) error {
 	if err != nil {
 		panic(err)
 	}
+	defer session.Close()
 
 	index := mgo.Index{
 		Key:    []string{"join_code"},
@@ -65,8 +66,6 @@ func api(cli *cli.Context) error {
 	if err != nil {
 		panic(err)
 	}
-
-	defer session.Close()
 
 	r.Use(store.Middleware(session, cli))
 
@@ -174,9 +173,7 @@ func api(cli *cli.Context) error {
 		}
 	})
 
-	r.Use(auth_middleware.MiddlewareFunc())
-
-	party_group := r.Group("/party")
+	party_group := r.Group("/party", auth_middleware.MiddlewareFunc())
 
 	// Party creation route
 	party_group.POST("/", func(context *gin.Context) {
@@ -414,8 +411,7 @@ func api(cli *cli.Context) error {
 		}
 	})
 
-	me := r.Group("/me")
-
+	me := r.Group("/me", auth_middleware.MiddlewareFunc())
 	me.GET("/", controllers.Me)
 
 	return r.Run(":" + cli.String("port"))

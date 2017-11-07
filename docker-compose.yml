@@ -15,7 +15,7 @@ services:
       PORT: "8081"
       SECURED: "false"
       PUBLIC: "false"
-      HOST: "api.qitup.ca"
+      HOST: "localhost"
       SIGNING_KEY:
       SPOTIFY_ID:
       SPOTIFY_SECRET:
