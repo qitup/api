@@ -8,6 +8,10 @@ import (
 
 var flags = []cli.Flag{
 	cli.StringFlag{
+		EnvVar: "GIN_MODE",
+		Name: "mode",
+	},
+	cli.StringFlag{
 		EnvVar: "HOST",
 		Name:   "host",
 	},

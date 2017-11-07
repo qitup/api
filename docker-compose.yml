@@ -12,6 +12,7 @@ services:
       - "8081:8081"
 
     environment:
+      GIN_MODE: "debug"
       PORT: "8081"
       SECURED: "false"
       PUBLIC: "false"

@@ -128,6 +128,12 @@
   revision = "54210f4e076c57f351166f0ed60e67d3fca57a36"
 
 [[projects]]
+  branch = "master"
+  name = "github.com/unrolled/secure"
+  packages = ["."]
+  revision = "0f73fc7feba662a2ad5ff887fe203af08f8f8716"
+
+[[projects]]
   name = "github.com/urfave/cli"
   packages = ["."]
   revision = "cfb38830724cc34fedffe9a2a29fb54fa9169cd1"
@@ -190,6 +196,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "5889468b7f41790aeefd335831c15ec4de463d74ded471580bbbb2cf9ce9af5e"
+  inputs-digest = "b10ce00ea99bca89fb70b40113f8dc1f5f7af49048caa00f36aebfee3637d36c"
   solver-name = "gps-cdcl"
   solver-version = 1

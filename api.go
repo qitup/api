@@ -24,7 +24,33 @@ import (
 	"dubclan/api/party"
 	"encoding/base64"
 	"dubclan/api/players"
+	"github.com/unrolled/secure"
 )
+
+func SecureHeaders(cli *cli.Context) gin.HandlerFunc {
+	secureMiddleware := secure.New(secure.Options{
+		IsDevelopment: cli.String("mode") == "debug" || cli.String("mode") == "test",
+
+		FrameDeny: true,
+	})
+
+	return func() gin.HandlerFunc {
+		return func(c *gin.Context) {
+			err := secureMiddleware.Process(c.Writer, c.Request)
+
+			// If there was an error, do not continue.
+			if err != nil {
+				c.Abort()
+				return
+			}
+
+			// Avoid header rewrite if response is a redirection.
+			if status := c.Writer.Status(); status > 300 && status < 399 {
+				c.Abort()
+			}
+		}
+	}()
+}
 
 func api(cli *cli.Context) error {
 	var signing_key []byte
@@ -39,6 +65,8 @@ func api(cli *cli.Context) error {
 	}
 
 	r := gin.Default()
+	r.Use(SecureHeaders(cli))
+
 	m := melody.New()
 	m.Config.MaxMessageSize = 8192
 
