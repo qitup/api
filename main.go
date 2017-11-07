@@ -15,6 +15,10 @@ var flags = []cli.Flag{
 		EnvVar: "SECURED",
 		Name:   "secured",
 	},
+	cli.BoolFlag{
+		EnvVar: "PUBLIC",
+		Name:   "public",
+	},
 	cli.StringFlag{
 		EnvVar: "PORT",
 		Name:   "port",

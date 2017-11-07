@@ -77,11 +77,18 @@ func api(cli *cli.Context) error {
 		http_protocol = "http"
 	}
 
+	var callback_url string
+	if cli.Bool("public") {
+		callback_url = http_protocol + "://" + cli.String("host")
+	} else {
+		callback_url = http_protocol + "://" + cli.String("host") + ":" + cli.String("port")
+	}
+
 	goth.UseProviders(
 		provider_spotify.New(
 			cli.String("spotify-id"),
 			cli.String("spotify-secret"),
-			http_protocol+"://"+cli.String("host")+":"+cli.String("port")+"/auth/spotify/callback",
+			callback_url+"/auth/spotify/callback",
 			"streaming", "user-library-read", "user-read-private", "user-read-playback-state", "user-modify-playback-state", "user-read-currently-playing",
 		),
 	)
