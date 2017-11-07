@@ -46,10 +46,24 @@ func CreateParty(redis redis.Conn, context *gin.Context, cli *cli.Context) {
 
 		connect_token, err := party.InitiateConnect(redis, party_record, attendee)
 
+		var ws_protocol string
+		if cli.Bool("secured") {
+			ws_protocol = "wss"
+		} else {
+			ws_protocol = "ws"
+		}
+
+		var connect_url string
+		if cli.Bool("public") {
+			connect_url = ws_protocol + "://" + cli.String("host")
+		} else {
+			connect_url = ws_protocol + "://" + cli.String("host") + ":" + cli.String("port")
+		}
+
 		switch err {
 		case nil:
 			context.JSON(201, gin.H{
-				"url":   "ws://" + cli.String("host") + ":" + cli.String("port") + "/party/connect/" + url.PathEscape(connect_token),
+				"url":   connect_url + "/party/connect/" + url.PathEscape(connect_token),
 				"party": party_record,
 				"queue": party.NewQueue(),
 			})
@@ -99,15 +113,29 @@ func JoinParty(redis redis.Conn, context *gin.Context, cli *cli.Context, party_s
 	connect_token, err := party.InitiateConnect(redis, *party_record, attendee)
 
 	if attendee.UserId != party_record.HostID {
-		if err := party_record.AddAttendee(mongo, &attendee); err != nil {
-			context.Error(err)
+		if err := party_record.AddAttendee(mongo, &attendee); err != nil && err != mgo.ErrNotFound {
+			context.AbortWithError(500, err)
 		}
+	}
+
+	var ws_protocol string
+	if cli.Bool("secured") {
+		ws_protocol = "wss"
+	} else {
+		ws_protocol = "ws"
+	}
+
+	var connect_url string
+	if cli.Bool("public") {
+		connect_url = ws_protocol + "://" + cli.String("host")
+	} else {
+		connect_url = ws_protocol + "://" + cli.String("host") + ":" + cli.String("port")
 	}
 
 	switch err {
 	case nil:
 		res := gin.H{
-			"url":   "ws://" + cli.String("host") + ":" + cli.String("port") + "/party/connect/" + url.PathEscape(connect_token),
+			"url":   connect_url + "/party/connect/" + url.PathEscape(connect_token),
 			"party": party_record,
 		}
 
