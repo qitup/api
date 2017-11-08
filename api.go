@@ -25,6 +25,7 @@ import (
 	"encoding/base64"
 	"dubclan/api/players"
 	"github.com/unrolled/secure"
+	"github.com/VividCortex/multitick"
 )
 
 func SecureHeaders(cli *cli.Context) gin.HandlerFunc {
@@ -263,6 +264,8 @@ func api(cli *cli.Context) error {
 		}
 	})
 
+	ticker := multitick.NewTicker(5 * time.Second, 0)
+
 	// Add session to the party map
 	m.HandleConnect(func(s *melody.Session) {
 		conn := pool.Get()
@@ -294,11 +297,8 @@ func api(cli *cli.Context) error {
 		} else {
 			log.Println("Connected to party with 0 other active attendees")
 
-			if queue, err := party.TryResumeQueue(conn, party_id.(string)); err == nil {
-				PartySessions[party_id.(string)] = &party.Session{
-					Sessions: map[*melody.Session]*melody.Session{s: s},
-					Queue:    queue,
-				}
+			if queue, err := party.ResumeQueue(conn, party_id.(string)); err == nil {
+				PartySessions[party_id.(string)] = party.NewSession(queue, ticker)
 			}
 		}
 
@@ -310,17 +310,18 @@ func api(cli *cli.Context) error {
 		s.Write([]byte(msg))
 	})
 
-	// Cleanup session from the party map
 	m.HandleDisconnect(func(s *melody.Session) {
 		party_id, _ := s.Get("party_id")
 
 		if session, ok := PartySessions[party_id.(string)]; ok {
+			// Cleanup session from the party map
 			delete(session.Sessions, s)
 
 			attendee_count := len(session.Sessions)
 			log.Println("Left session with", attendee_count, "other active attendees")
 
 			if attendee_count == 0 {
+				session.Stop()
 				delete(PartySessions, party_id.(string))
 			} else {
 				// Notify others this attendee has disconnected

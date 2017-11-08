@@ -7,10 +7,13 @@ import (
 	"dubclan/api/models"
 	"errors"
 	"encoding/base64"
+	"github.com/VividCortex/multitick"
+	"time"
+	"log"
 )
 
 const (
-	PARTY_PREFIX = "party:"
+	PARTY_PREFIX     = "party:"
 	JOIN_CODE_PREFIX = "join_code:"
 )
 
@@ -19,6 +22,42 @@ var ConnectTokenIssued = errors.New("connect token currently issued for this use
 type Session struct {
 	Sessions map[*melody.Session]*melody.Session
 	Queue    *Queue
+	// Send true when a party becomes inactive
+	Inactive chan bool
+}
+
+func NewSession(queue *Queue, ticker *multitick.Ticker) (*Session) {
+	session := &Session{
+		Sessions: make(map[*melody.Session]*melody.Session),
+		Queue:    queue,
+		Inactive: make(chan bool),
+	}
+
+	go session.update(ticker.Subscribe())
+
+	return session
+}
+
+func (s *Session) Stop() {
+	s.Inactive <- true
+}
+
+// Update the state of the players until a session becomes inactive
+func (s *Session) update(ticked <-chan time.Time) {
+	for {
+		select {
+		// Update states of our players
+		case tick := <-ticked:
+			log.Println("TICKED", tick)
+			break
+
+		case done := <-s.Inactive:
+			if done {
+				return
+			}
+			break
+		}
+	}
 }
 
 func InitiateConnect(redis redis.Conn, party models.Party, attendee models.Attendee) (string, error) {

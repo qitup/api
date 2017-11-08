@@ -16,7 +16,7 @@ func NewQueue() Queue {
 	}
 }
 
-func TryResumeQueue(conn redis.Conn, party string) (*Queue, error) {
+func ResumeQueue(conn redis.Conn, party string) (*Queue, error) {
 	if list, err := redis.Strings(conn.Do("LRANGE", PARTY_PREFIX+party, 0, -1)); err == nil {
 		queue := NewQueue()
 

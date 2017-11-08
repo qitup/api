@@ -142,7 +142,7 @@ func JoinParty(redis redis.Conn, context *gin.Context, cli *cli.Context, party_s
 		// Add the queue's contents to the response if available
 		if session, ok := party_sessions[party_record.ID.Hex()]; ok {
 			res["queue"] = session.Queue
-		} else if queue, err := party.TryResumeQueue(redis, party_record.ID.Hex()); err == nil {
+		} else if queue, err := party.ResumeQueue(redis, party_record.ID.Hex()); err == nil {
 			res["queue"] = queue
 		}
 

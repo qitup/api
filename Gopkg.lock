@@ -8,6 +8,12 @@
   revision = "8c3362a5e6781e0d1046f1267b3c1f19b2cde334"
 
 [[projects]]
+  branch = "master"
+  name = "github.com/VividCortex/multitick"
+  packages = ["."]
+  revision = "093e689081f93f076729cda83517a5379dd9895d"
+
+[[projects]]
   name = "github.com/appleboy/gin-jwt"
   packages = ["."]
   revision = "f7347d7c16fc8297bf5b7215b9e4847a5ca05d90"
@@ -196,6 +202,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "b10ce00ea99bca89fb70b40113f8dc1f5f7af49048caa00f36aebfee3637d36c"
+  inputs-digest = "8a6371bf262cecfc79b4638252268f94882717183ceb33fd84359359e5d0d11a"
   solver-name = "gps-cdcl"
   solver-version = 1
