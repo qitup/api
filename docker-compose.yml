@@ -26,6 +26,7 @@ services:
       - traefik.enable=true
       - traefik.backend=api
       - traefik.frontend.rule=Host:api.qitup.ca
+      - traefik.frontend.passHostHeader=true
       - traefik.docker.network=proxy
       - traefik.port=8081
     networks:
