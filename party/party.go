@@ -10,6 +10,7 @@ import (
 	"github.com/VividCortex/multitick"
 	"time"
 	"log"
+	"dubclan/api/players"
 )
 
 const (
@@ -24,6 +25,7 @@ type Session struct {
 	Queue    *Queue
 	// Send true when a party becomes inactive
 	Inactive chan bool
+	Players []*player.Player
 }
 
 func NewSession(queue *Queue, ticker *multitick.Ticker) (*Session) {
@@ -49,6 +51,9 @@ func (s *Session) update(ticked <-chan time.Time) {
 		// Update states of our players
 		case tick := <-ticked:
 			log.Println("TICKED", tick)
+			//for _, player := range s.Players {
+			//	player.UpdateState()
+			//}
 			break
 
 		case done := <-s.Inactive:
