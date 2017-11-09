@@ -1,11 +1,12 @@
 package player
 
+import "dubclan/api/party"
+
 type Player interface {
-	Play() (error)
-	Stop() (error)
-	Next() (error)
-	Previous() (error)
-	UpdateState(event Event)
+	Play(item party.Item) (error)
+	Stop(item party.Item) (error)
+	Next(item party.Item) (error)
+	Previous(item party.Item) (error)
 }
 
 type Event struct {
