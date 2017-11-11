@@ -221,6 +221,7 @@ func (c *PartyController) Connect(context *gin.Context, m *melody.Melody) {
 		context.AbortWithError(500, err)
 		return
 	}
+	defer conn.Close()
 
 	// Handle the request if the url is valid
 	if success, party_id, err := party.FinishConnect(conn, connect_token); success && err == nil {
@@ -245,10 +246,9 @@ func (c *PartyController) Connect(context *gin.Context, m *melody.Melody) {
 func (c *PartyController) HandleConnect(s *melody.Session) {
 	conn, err := c.Redis.GetConnection()
 	if err != nil {
-		log.Println(err)
+		log.Println("Failed obtaining redis connection", err)
 		return
 	}
-
 	defer conn.Close()
 
 	party_id, _ := s.Get("party_id")
@@ -344,9 +344,10 @@ func (c *PartyController) PushItem(s *melody.Session, raw_item json.RawMessage) 
 
 	conn, err := c.Redis.GetConnection()
 	if err != nil {
-		log.Println("Failed obtaining redis connection")
+		log.Println("Failed obtaining redis connection", err)
 		return
 	}
+	defer conn.Close()
 
 	if err := session.Queue.Push(conn, party_id.(string), item); err == nil {
 		event, err := json.Marshal(gin.H{
