@@ -1,16 +1,15 @@
-package player
+package party
 
 import (
-	"dubclan/api/party"
 	"golang.org/x/oauth2"
 )
 
 type Player interface {
 	New(token *oauth2.Token)
-	Play(item party.Item) (error)
-	Stop(item party.Item) (error)
-	Next(item party.Item) (error)
-	Previous(item party.Item) (error)
+	Play(item Item) (error)
+	Pause(item Item) (error)
+	Next(item Item) (error)
+	Previous(item Item) (error)
 	UpdateState() (error)
 }
 

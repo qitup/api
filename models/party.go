@@ -10,7 +10,8 @@ const PARTY_COLLECTION = "party"
 
 type Party struct {
 	ID        bson.ObjectId `json:"id" bson:"_id"`
-	HostID    bson.ObjectId `json:"host_id" bson:"host_id"`
+	HostID    bson.ObjectId `json:"-" bson:"host_id"`
+	Host      User          `json:"host" bson:"host,omitempty"`
 	Attendees []*Attendee   `json:"attendees" bson:"attendees"`
 	JoinCode  string        `json:"join_code" bson:"join_code"`
 	Name      string        `json:"name" bson:"name"`
@@ -18,7 +19,8 @@ type Party struct {
 }
 
 type Attendee struct {
-	UserId   bson.ObjectId `json:"user_id" bson:"user_id"`
+	UserId   bson.ObjectId `json:"-" bson:"user_id"`
+	User     User          `json:"user" bson:"user,omitempty"`
 	JoinedAt time.Time     `json:"joined_at" bson:"joined_at"`
 }
 
@@ -43,7 +45,49 @@ func NewAttendee(user_id bson.ObjectId) Attendee {
 func PartyByCode(db *mgo.Database, code string) (*Party, error) {
 	var party Party
 
-	err := db.C(PARTY_COLLECTION).Find(bson.M{"join_code": code}).One(&party)
+	err := db.C(PARTY_COLLECTION).Pipe([]bson.M{
+		{"$match": bson.M{"join_code": code}},
+		{
+			"$lookup": bson.M{
+				"localField":   "host_id",
+				"from":         "user",
+				"foreignField": "_id",
+				"as":           "host",
+			},
+		},
+		{"$unwind": "$host"},
+		{"$unwind": "$attendees"},
+		{
+			"$lookup": bson.M{
+				"localField":   "attendees.user_id",
+				"from":         "user",
+				"foreignField": "_id",
+				"as":           "attendees.user",
+			},
+		},
+		{"$unwind": "$attendees.user"},
+		{
+			"$group": bson.M{
+				"_id":        "$_id",
+				"name":       bson.M{"$first": "$name"},
+				"join_code":  bson.M{"$first": "$join_code"},
+				"created_at": bson.M{"$first": "$created_at"},
+				"host_id":    bson.M{"$first": "$host_id"},
+				"host":       bson.M{"$first": "$host"},
+				"attendees":  bson.M{"$push": "$attendees"},
+			},
+		},
+		{
+			"$project": bson.M{
+				"name":       1,
+				"join_code":  1,
+				"created_at": 1,
+				"host_id":    1,
+				"host":       1,
+				"attendees":  1,
+			},
+		},
+	}).One(&party)
 
 	return &party, err
 }

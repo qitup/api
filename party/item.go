@@ -14,13 +14,12 @@ type Item interface {
 }
 
 type ItemState struct {
-	Index    int `json:"index"`
 	Progress int `json:"progress"`
 }
 
 type BaseItem struct {
 	Type    string        `json:"type" bson:"type"`
-	AddedBy bson.ObjectId `json:"added_by" bson:"added_by"`
+	AddedBy bson.ObjectId `json:"added_by" bson:"added_by,omitempty"`
 	AddedAt time.Time     `json:"added_at" bson:"added_at"`
 	State   ItemState     `json:"state" bson:"state"`
 }
@@ -31,7 +30,7 @@ func (i *BaseItem) Added(by bson.ObjectId) {
 }
 
 func (i *BaseItem) UpdateState(new ItemState) {
-
+	i.State = new
 }
 
 func UnmarshalItem(b []byte) (Item, error) {

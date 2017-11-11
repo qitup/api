@@ -1,23 +1,60 @@
 package controllers
 
 import (
-	"github.com/gin-gonic/gin"
-	"gopkg.in/dgrijalva/jwt-go.v3"
-	"github.com/zmb3/spotify"
-	"os"
-	"golang.org/x/oauth2"
-	"time"
 	"dubclan/api/models"
+	"dubclan/api/party"
+	"github.com/gin-gonic/gin"
 	"gopkg.in/mgo.v2/bson"
 	"gopkg.in/mgo.v2"
-	"github.com/garyburd/redigo/redis"
 	"github.com/urfave/cli"
 	"net/url"
-	"dubclan/api/party"
+	"dubclan/api/store"
+	"github.com/olahol/melody"
+	"encoding/json"
+	"log"
+	"github.com/VividCortex/multitick"
+	"time"
 )
 
-func CreateParty(redis redis.Conn, context *gin.Context, cli *cli.Context) {
-	mongo := context.MustGet("mongo").(*mgo.Database)
+var ticker = multitick.NewTicker(5*time.Second, 0)
+
+type PartyController struct {
+	baseController
+	party_sessions map[string]*party.Session
+}
+
+func NewPartyController(mongo *store.MongoStore, redis *store.RedisStore) PartyController {
+	return PartyController{
+		baseController: newBaseController(mongo, redis),
+		party_sessions: make(map[string]*party.Session),
+	}
+}
+
+func (c *PartyController) Get(context *gin.Context) {
+	db := c.Mongo.DB()
+
+	code := context.Query("code")
+
+	party_record, err := models.PartyByCode(db, code)
+
+	if err == mgo.ErrNotFound {
+		context.JSON(400, gin.H{
+			"error": gin.H{
+				"code": "party_not_found",
+				"msg":  "party not found",
+			},
+		})
+		return
+	} else if err != nil {
+		context.AbortWithError(500, err)
+		return
+	}
+
+	context.JSON(200, party_record)
+}
+
+func (c *PartyController) Create(context *gin.Context, cli *cli.Context) {
+	db := c.Mongo.DB()
 
 	var data struct {
 		Name     string `json:"name"`
@@ -29,7 +66,7 @@ func CreateParty(redis redis.Conn, context *gin.Context, cli *cli.Context) {
 	if context.BindJSON(&data) == nil {
 		party_record := models.NewParty(user_id, data.Name, data.JoinCode)
 
-		err := party_record.Insert(mongo)
+		err := party_record.Insert(db)
 
 		if mgo.IsDup(err) {
 			context.JSON(400, gin.H{
@@ -44,7 +81,13 @@ func CreateParty(redis redis.Conn, context *gin.Context, cli *cli.Context) {
 
 		attendee := models.NewAttendee(bson.ObjectIdHex(context.GetString("userID")))
 
-		connect_token, err := party.InitiateConnect(redis, party_record, attendee)
+		conn, err := c.Redis.GetConnection()
+		if err != nil {
+			context.AbortWithError(500, err)
+		}
+		defer conn.Close()
+
+		connect_token, err := party.InitiateConnect(conn, party_record, attendee)
 
 		var ws_protocol string
 		if cli.Bool("secured") {
@@ -88,18 +131,18 @@ func CreateParty(redis redis.Conn, context *gin.Context, cli *cli.Context) {
 //		join_token: sha2(user_id + join_code)
 // set key in redis with 30 sec ttl
 // 		SETEX join_token 30
-func JoinParty(redis redis.Conn, context *gin.Context, cli *cli.Context, party_sessions map[string]*party.Session) {
-	mongo := context.MustGet("mongo").(*mgo.Database)
+func (c *PartyController) Join(context *gin.Context, cli *cli.Context) {
+	db := c.Mongo.DB()
 
 	code := context.Query("code")
 
-	party_record, err := models.PartyByCode(mongo, code)
+	party_record, err := models.PartyByCode(db, code)
 
 	if err == mgo.ErrNotFound {
 		context.JSON(400, gin.H{
 			"error": gin.H{
 				"code": "party_not_found",
-				"msg":  "Party not found",
+				"msg":  "party not found",
 			},
 		})
 		return
@@ -110,10 +153,16 @@ func JoinParty(redis redis.Conn, context *gin.Context, cli *cli.Context, party_s
 
 	attendee := models.NewAttendee(bson.ObjectIdHex(context.GetString("userID")))
 
-	connect_token, err := party.InitiateConnect(redis, *party_record, attendee)
+	conn, err := c.Redis.GetConnection()
+	if err != nil {
+		context.AbortWithError(500, err)
+	}
+	defer conn.Close()
+
+	connect_token, err := party.InitiateConnect(conn, *party_record, attendee)
 
 	if attendee.UserId != party_record.HostID {
-		if err := party_record.AddAttendee(mongo, &attendee); err != nil && err != mgo.ErrNotFound {
+		if err := party_record.AddAttendee(db, &attendee); err != nil && err != mgo.ErrNotFound {
 			context.AbortWithError(500, err)
 		}
 	}
@@ -140,9 +189,9 @@ func JoinParty(redis redis.Conn, context *gin.Context, cli *cli.Context, party_s
 		}
 
 		// Add the queue's contents to the response if available
-		if session, ok := party_sessions[party_record.ID.Hex()]; ok {
+		if session, ok := c.party_sessions[party_record.ID.Hex()]; ok {
 			res["queue"] = session.Queue
-		} else if queue, err := party.ResumeQueue(redis, party_record.ID.Hex()); err == nil {
+		} else if queue, err := party.ResumeQueue(conn, party_record.ID.Hex()); err == nil {
 			res["queue"] = queue
 		}
 
@@ -160,19 +209,160 @@ func JoinParty(redis redis.Conn, context *gin.Context, cli *cli.Context, party_s
 	}
 }
 
-//func ConnectParty
+func (c *PartyController) Connect(context *gin.Context, m *melody.Melody) {
+	connect_token, err := url.PathUnescape(context.Param("code"))
+	if err != nil {
+		context.AbortWithError(500, err)
+		return
+	}
 
-func GetParty(c *gin.Context) {
-	claims := c.MustGet("JWT_PAYLOAD").(jwt.MapClaims)
+	conn, err := c.Redis.GetConnection()
+	if err != nil {
+		context.AbortWithError(500, err)
+		return
+	}
 
-	auth := spotify.NewAuthenticator(os.Getenv("BASE_HOST")+"/auth/spotify/callback", spotify.ScopeUserReadPrivate)
+	// Handle the request if the url is valid
+	if success, party_id, err := party.FinishConnect(conn, connect_token); success && err == nil {
+		if err := m.HandleRequestWithKeys(context.Writer, context.Request, gin.H{
+			"channel":  "party",
+			"party_id": party_id,
+			"user_id":  context.GetString("userID"),
+		}); err != nil {
+			context.AbortWithError(500, err)
+		}
+	} else {
+		context.JSON(410, gin.H{
+			"type": "error",
+			"error": gin.H{
+				"code": "url_expired",
+				"msg":  "Socket URL has expired",
+			},
+		})
+	}
+}
 
-	client := auth.NewClient(&oauth2.Token{
-		AccessToken: claims["access_token"].(string),
-		Expiry:      time.Unix(int64(claims["exp"].(float64)), 0),
+func (c *PartyController) HandleConnect(s *melody.Session) {
+	conn, err := c.Redis.GetConnection()
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	defer conn.Close()
+
+	party_id, _ := s.Get("party_id")
+
+	// Notify others this attendee has become active
+	if session, ok := c.party_sessions[party_id.(string)]; ok {
+		attendee_count := len(session.Sessions)
+		log.Println("Connected to party with", attendee_count, "other active attendees")
+
+		res, _ := json.Marshal(gin.H{
+			"type": "attendee.active",
+			"user": s.MustGet("user_id"),
+		})
+
+		for _, sess := range session.Sessions {
+			if writeErr := sess.Write(res); writeErr != nil {
+				log.Println(writeErr)
+			}
+		}
+
+		session.Sessions[s] = s
+	} else {
+		log.Println("Connected to party with 0 other active attendees")
+
+		if queue, err := party.ResumeQueue(conn, party_id.(string)); err == nil {
+			session := party.NewSession(queue, ticker)
+			session.Sessions[s] = s
+
+			c.party_sessions[party_id.(string)] = session
+		}
+	}
+
+	// Say hello to the user when they connect
+	msg, _ := json.Marshal(gin.H{
+		"type": "hello",
 	})
 
-	client.PlayOpt(&spotify.PlayOptions{
-		URIs: []spotify.URI{"spotify:track:29tzM8oIgOxBr3cI9CBOpb"},
-	})
+	s.Write([]byte(msg))
+}
+
+func (c *PartyController) HandleDisconnect(s *melody.Session) {
+	party_id, _ := s.Get("party_id")
+
+	if session, ok := c.party_sessions[party_id.(string)]; ok {
+		// Cleanup session from the party map
+		delete(session.Sessions, s)
+
+		attendee_count := len(session.Sessions)
+		log.Println("Left session with", attendee_count, "other active attendees")
+
+		if attendee_count == 0 {
+			session.Stop()
+			delete(c.party_sessions, party_id.(string))
+		} else {
+			// Notify others this attendee has disconnected
+			res, _ := json.Marshal(gin.H{
+				"type": "attendee.offline",
+				"user": s.MustGet("user_id"),
+			})
+
+			for _, sess := range session.Sessions {
+				if writeErr := sess.Write(res); writeErr != nil {
+					log.Println(writeErr)
+				}
+			}
+		}
+	} else {
+		log.Printf("No party session exists for (%s), something's fucky", party_id)
+	}
+}
+
+func (c *PartyController) PushItem(s *melody.Session, raw_item json.RawMessage) {
+	item, err := party.UnmarshalItem(raw_item)
+
+	if err != nil {
+		error_res, _ := json.Marshal(gin.H{
+			"type": "error",
+			"error": gin.H{
+				"code": "invalid_json",
+				"msg":  "Invalid JSON message",
+			},
+		})
+
+		s.Write([]byte(error_res))
+		return
+	}
+
+	user_id := s.MustGet("user_id").(string)
+	item.Added(bson.ObjectIdHex(user_id))
+
+	party_id := s.MustGet("party_id")
+	session := c.party_sessions[party_id.(string)]
+
+	conn, err := c.Redis.GetConnection()
+	if err != nil {
+		log.Println("Failed obtaining redis connection")
+		return
+	}
+
+	if err := session.Queue.Push(conn, party_id.(string), item); err == nil {
+		event, err := json.Marshal(gin.H{
+			"item": item,
+			"type": "queue.push",
+		})
+
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		for _, sess := range session.Sessions {
+			if writeErr := sess.Write(event); writeErr != nil {
+				log.Println(writeErr)
+			}
+		}
+	}
 }
