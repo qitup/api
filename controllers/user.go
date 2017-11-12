@@ -5,7 +5,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
-	"github.com/Pallinder/go-randomdata"
 	"errors"
 	"dubclan/api/store"
 )
@@ -30,7 +29,8 @@ func NewUserController(mongo *store.MongoStore, redis *store.RedisStore) UserCon
 // 		Yes -> Login/Refresh Access token
 // 		No -> register new user in store
 func (c *UserController) CompleteUserAuth(context *gin.Context, assume_identity models.Identity) (*models.User, error) {
-	db := c.Mongo.DB()
+	session, db := c.Mongo.DB()
+	defer session.Close()
 
 	if user_id, exists := context.Get("userID"); exists {
 		id := bson.ObjectIdHex(user_id.(string))
@@ -46,10 +46,9 @@ func (c *UserController) CompleteUserAuth(context *gin.Context, assume_identity 
 			new_user := &models.User{
 				ID:         bson.NewObjectId(),
 				Identities: []*models.Identity{&assume_identity},
-				Username:   randomdata.SillyName(),
 			}
 
-			if err := models.SaveUser(db, new_user); err == nil {
+			if err := new_user.AssumeIdentity(db, assume_identity); err == nil {
 				return new_user, nil
 			} else {
 				return nil, err
@@ -61,7 +60,8 @@ func (c *UserController) CompleteUserAuth(context *gin.Context, assume_identity 
 }
 
 func (c *UserController) Me(context *gin.Context) {
-	db := c.Mongo.DB()
+	session, db := c.Mongo.DB()
+	defer session.Close()
 
 	if user_id, exists := context.Get("userID"); exists {
 

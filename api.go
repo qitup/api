@@ -24,7 +24,7 @@ import (
 	"dubclan/api/party/spotify"
 )
 
-func SecureHeaders(cli *cli.Context) gin.HandlerFunc {
+func secureHeaders(cli *cli.Context) gin.HandlerFunc {
 	secureMiddleware := secure.New(secure.Options{
 		IsDevelopment: cli.String("mode") == "debug" || cli.String("mode") == "test",
 
@@ -54,20 +54,25 @@ func SecureHeaders(cli *cli.Context) gin.HandlerFunc {
 	}()
 }
 
-func api(cli *cli.Context) error {
-	var signing_key []byte
-
+func decodeSigningKey(cli *cli.Context) ([]byte, error) {
 	key_data := cli.String("signing-key")
 
 	// Decode the signing key
 	if key, err := base64.StdEncoding.DecodeString(key_data); err == nil {
-		signing_key = key
+		return key, nil
 	} else {
-		return err
+		return nil, err
+	}
+}
+
+func api(cli *cli.Context) error {
+	signing_key, err := decodeSigningKey(cli)
+	if err != nil {
+		panic(err)
 	}
 
-	r := gin.Default()
-	r.Use(SecureHeaders(cli))
+	router := gin.Default()
+	router.Use(secureHeaders(cli))
 
 	m := melody.New()
 	m.Config.MaxMessageSize = 8192
@@ -99,6 +104,7 @@ func api(cli *cli.Context) error {
 		panic(err)
 	}
 
+	// Initialize controllers
 	var (
 		user_controller  = controllers.NewUserController(mongo_store, redis_store)
 		party_controller = controllers.NewPartyController(mongo_store, redis_store)
@@ -146,7 +152,7 @@ func api(cli *cli.Context) error {
 		},
 	}
 
-	r.GET("/auth/:provider/callback", func(context *gin.Context) {
+	router.GET("/auth/:provider/callback", func(context *gin.Context) {
 		identity, err := gothic.CompleteUserAuth(context.Writer, context.Request)
 		if err != nil {
 			context.AbortWithError(500, err)
@@ -159,7 +165,7 @@ func api(cli *cli.Context) error {
 			return
 		}
 
-		token_blob, err := user.NewToken(signing_key)
+		token_blob, err := user.NewToken(cli.String("host"), signing_key)
 		if err != nil {
 			context.Error(err)
 		}
@@ -170,14 +176,14 @@ func api(cli *cli.Context) error {
 		})
 	})
 
-	r.GET("/logout/:provider", func(context *gin.Context) {
+	router.GET("/logout/:provider", func(context *gin.Context) {
 		gothic.Logout(context.Writer, context.Request)
 
 		context.Header("Location", "/")
 		context.Status(http.StatusTemporaryRedirect)
 	})
 
-	r.GET("/auth/:provider", func(context *gin.Context) {
+	router.GET("/auth/:provider", func(context *gin.Context) {
 		// try to get the user without re-authenticating
 		if _, err := gothic.CompleteUserAuth(context.Writer, context.Request); err == nil {
 			context.Next()
@@ -186,7 +192,7 @@ func api(cli *cli.Context) error {
 		}
 	})
 
-	party_group := r.Group("/party", auth_middleware.MiddlewareFunc())
+	party_group := router.Group("/party", auth_middleware.MiddlewareFunc())
 
 	party_group.GET("/", party_controller.Get)
 
@@ -290,8 +296,8 @@ func api(cli *cli.Context) error {
 		}
 	})
 
-	me := r.Group("/me", auth_middleware.MiddlewareFunc())
+	me := router.Group("/me", auth_middleware.MiddlewareFunc())
 	me.GET("/", user_controller.Me)
 
-	return r.Run(":" + cli.String("port"))
+	return router.Run(":" + cli.String("port"))
 }

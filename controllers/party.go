@@ -31,7 +31,8 @@ func NewPartyController(mongo *store.MongoStore, redis *store.RedisStore) PartyC
 }
 
 func (c *PartyController) Get(context *gin.Context) {
-	db := c.Mongo.DB()
+	session, db := c.Mongo.DB()
+	defer session.Close()
 
 	code := context.Query("code")
 
@@ -54,7 +55,8 @@ func (c *PartyController) Get(context *gin.Context) {
 }
 
 func (c *PartyController) Create(context *gin.Context, cli *cli.Context) {
-	db := c.Mongo.DB()
+	session, db := c.Mongo.DB()
+	defer session.Close()
 
 	var data struct {
 		Name     string `json:"name"`
@@ -75,6 +77,12 @@ func (c *PartyController) Create(context *gin.Context, cli *cli.Context) {
 			})
 			return
 		} else if err != nil {
+			context.AbortWithError(500, err)
+			return
+		}
+
+		// Get the host details
+		if err := party_record.WithHost(db); err != nil {
 			context.AbortWithError(500, err)
 			return
 		}
@@ -132,7 +140,8 @@ func (c *PartyController) Create(context *gin.Context, cli *cli.Context) {
 // set key in redis with 30 sec ttl
 // 		SETEX join_token 30
 func (c *PartyController) Join(context *gin.Context, cli *cli.Context) {
-	db := c.Mongo.DB()
+	session, db := c.Mongo.DB()
+	defer session.Close()
 
 	code := context.Query("code")
 

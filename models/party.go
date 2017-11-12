@@ -4,9 +4,10 @@ import (
 	"time"
 	"gopkg.in/mgo.v2/bson"
 	"gopkg.in/mgo.v2"
+	"errors"
 )
 
-const PARTY_COLLECTION = "party"
+const PARTY_COLLECTION = "parties"
 
 type Party struct {
 	ID        bson.ObjectId `json:"id" bson:"_id"`
@@ -24,10 +25,10 @@ type Attendee struct {
 	JoinedAt time.Time     `json:"joined_at" bson:"joined_at"`
 }
 
-func NewParty(host bson.ObjectId, name, join_code string) (Party) {
+func NewParty(host_id bson.ObjectId, name, join_code string) (Party) {
 	return Party{
 		ID:        bson.NewObjectId(),
-		HostID:    host,
+		HostID:    host_id,
 		Attendees: []*Attendee{},
 		Name:      name,
 		JoinCode:  join_code,
@@ -50,22 +51,22 @@ func PartyByCode(db *mgo.Database, code string) (*Party, error) {
 		{
 			"$lookup": bson.M{
 				"localField":   "host_id",
-				"from":         "user",
+				"from":         USER_COLLECTION,
 				"foreignField": "_id",
 				"as":           "host",
 			},
 		},
 		{"$unwind": "$host"},
-		{"$unwind": "$attendees"},
+		{"$unwind": bson.M{"path": "$attendees", "preserveNullAndEmptyArrays": true}},
 		{
 			"$lookup": bson.M{
 				"localField":   "attendees.user_id",
-				"from":         "user",
+				"from":         USER_COLLECTION,
 				"foreignField": "_id",
 				"as":           "attendees.user",
 			},
 		},
-		{"$unwind": "$attendees.user"},
+		{"$unwind": bson.M{"path": "$attendees.user", "preserveNullAndEmptyArrays": true}},
 		{
 			"$group": bson.M{
 				"_id":        "$_id",
@@ -84,7 +85,9 @@ func PartyByCode(db *mgo.Database, code string) (*Party, error) {
 				"created_at": 1,
 				"host_id":    1,
 				"host":       1,
-				"attendees":  1,
+				"attendees": bson.M{
+					"$cond": []interface{}{bson.M{"$ne": []interface{}{"$attendees.user", []interface{}{}}}, "$attendees", []interface{}{}},
+				},
 			},
 		},
 	}).One(&party)
@@ -123,4 +126,17 @@ func (p *Party) AddAttendee(db *mgo.Database, attendee *Attendee) (error) {
 	}
 
 	return err
+}
+
+func (p *Party) WithHost(db *mgo.Database) (error) {
+	if p.HostID.Valid() {
+		if user, err := UserByID(db, p.HostID); err == nil {
+			p.Host = user
+			return nil
+		} else {
+			return err
+		}
+	} else {
+		return errors.New("invalid party host")
+	}
 }

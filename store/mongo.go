@@ -15,6 +15,7 @@ func NewMongoStore(session *mgo.Session, database string) *MongoStore {
 	}
 }
 
-func (s *MongoStore) DB() *mgo.Database {
-	return s.session.Copy().DB(s.database)
+func (s *MongoStore) DB() (*mgo.Session, *mgo.Database) {
+	session := s.session.Copy()
+	return session, session.DB(s.database)
 }
