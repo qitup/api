@@ -264,6 +264,18 @@ func api(cli *cli.Context) error {
 		}
 	})
 
+	party_group.POST("/player/play", func(context *gin.Context) {
+		conn := pool.Get()
+		defer conn.Close()
+
+		if err := conn.Err(); err != nil {
+			context.AbortWithError(500, err)
+			return
+		}
+
+
+	})
+
 	ticker := multitick.NewTicker(5 * time.Second, 0)
 
 	// Add session to the party map
