@@ -11,6 +11,9 @@ import (
 
 type APIClaims struct {
 	jwt.StandardClaims
+	Email    string `json:"email"`
+	Name     string `json:"name"`
+	Username string `json:"username"`
 }
 
 const USER_COLLECTION = "users"
@@ -18,6 +21,7 @@ const USER_COLLECTION = "users"
 type User struct {
 	ID         bson.ObjectId `json:"id" bson:"id"`
 	Identities []*Identity   `json:"-" bson:"identities"`
+	Email      string        `json:"email" bson:"email"`
 	Username   string        `json:"username" bson:"username"`
 	Name       string        `json:"name" bson:"name"`
 	AvatarURL  string        `json:"avatar_url" bson:"avatar_url"`
@@ -96,10 +100,15 @@ func UpdateIdentityById(db *mgo.Database, id bson.ObjectId, identity Identity) (
 func (u *User) NewToken(host string, signing_key []byte) (string, error) {
 	claims := APIClaims{
 		StandardClaims: jwt.StandardClaims{
+			IssuedAt:  time.Now().Unix(),
 			ExpiresAt: time.Now().Add(time.Hour * 6).Unix(),
 			Issuer:    host,
 			Subject:   u.ID.Hex(),
+			Audience:  "qitup-app",
 		},
+		Email:    u.Email,
+		Name:     u.Name,
+		Username: u.Username,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -126,6 +135,8 @@ func (u *User) AssumeIdentity(db *mgo.Database, identity Identity) error {
 	} else {
 		u.AvatarURL = "https://api.adorable.io/avatars/" + u.Username
 	}
+
+	u.Email = identity.Email
 
 	return u.Save(db)
 }

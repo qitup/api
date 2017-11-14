@@ -7,7 +7,7 @@ import (
 	"dubclan/api/models"
 	"errors"
 	"encoding/base64"
-	"github.com/VividCortex/multitick"
+	//"github.com/VividCortex/multitick"
 	"time"
 	"log"
 )
@@ -23,19 +23,14 @@ type Session struct {
 	Host models.User
 	Sessions map[*melody.Session]*melody.Session
 	Queue    *Queue
-	// Send true when a party becomes inactive
-	Inactive chan bool
 	Players map[string]Player
 }
 
-func NewSession(queue *Queue, ticker *multitick.Ticker) (*Session) {
+func NewSession(queue *Queue) (*Session) {
 	session := &Session{
 		Sessions: make(map[*melody.Session]*melody.Session),
 		Queue:    queue,
-		Inactive: make(chan bool),
 	}
-
-	go session.update(ticker.Subscribe())
 
 	return session
 }
@@ -46,7 +41,7 @@ func (s *Session) InitializePlayer(service string, player Player) {
 }
 
 func (s *Session) Stop() {
-	s.Inactive <- true
+	//s.Inactive <- true
 }
 
 // Update the state of the players until a session becomes inactive
@@ -61,11 +56,11 @@ func (s *Session) update(ticked <-chan time.Time) {
 			//}
 			break
 
-		case done := <-s.Inactive:
-			if done {
-				return
-			}
-			break
+		//case done := <-s.Inactive:
+		//	if done {
+		//		return
+		//	}
+		//	break
 		}
 	}
 }

@@ -21,7 +21,9 @@ import (
 	"dubclan/api/party"
 	"encoding/base64"
 	"github.com/unrolled/secure"
-	"dubclan/api/party/spotify"
+	spotify_player "dubclan/api/party/spotify"
+	"golang.org/x/oauth2/clientcredentials"
+	"github.com/zmb3/spotify"
 )
 
 func secureHeaders(cli *cli.Context) gin.HandlerFunc {
@@ -129,7 +131,7 @@ func api(cli *cli.Context) error {
 			cli.String("spotify-id"),
 			cli.String("spotify-secret"),
 			callback_url+"/auth/spotify/callback",
-			spotify.Scopes...,
+			spotify_player.HostScopes...,
 		),
 	)
 
@@ -192,6 +194,22 @@ func api(cli *cli.Context) error {
 		}
 	})
 
+	router.GET("/spotify/token", auth_middleware.MiddlewareFunc(), func(context *gin.Context) {
+		config := &clientcredentials.Config{
+			ClientID:     cli.String("spotify-id"),
+			ClientSecret: cli.String("spotify-secret"),
+			TokenURL:     spotify.TokenURL,
+		}
+
+		token, err := config.Token(context)
+		if err != nil {
+			context.AbortWithError(500, err)
+			return
+		}
+
+		context.JSON(200, token)
+	})
+
 	party_group := router.Group("/party", auth_middleware.MiddlewareFunc())
 
 	party_group.GET("/", party_controller.Get)
@@ -208,6 +226,8 @@ func api(cli *cli.Context) error {
 	party_group.GET("/connect/:code", func(context *gin.Context) {
 		party_controller.Connect(context, m)
 	})
+
+	party_group.GET("/push", party_controller.PushHTTP)
 
 	// Handle channel connections
 	m.HandleConnect(func(s *melody.Session) {
@@ -270,7 +290,7 @@ func api(cli *cli.Context) error {
 				s.Write([]byte(res))
 				break
 			case "queue.push":
-				party_controller.PushItem(s, *msg["item"])
+				party_controller.PushSocket(s, *msg["item"])
 				break
 			case "player.event":
 				var event party.Event

@@ -12,11 +12,7 @@ import (
 	"github.com/olahol/melody"
 	"encoding/json"
 	"log"
-	"github.com/VividCortex/multitick"
-	"time"
 )
-
-var ticker = multitick.NewTicker(5*time.Second, 0)
 
 type PartyController struct {
 	baseController
@@ -283,7 +279,7 @@ func (c *PartyController) HandleConnect(s *melody.Session) {
 		log.Println("Connected to party with 0 other active attendees")
 
 		if queue, err := party.ResumeQueue(conn, party_id.(string)); err == nil {
-			session := party.NewSession(queue, ticker)
+			session := party.NewSession(queue)
 			session.Sessions[s] = s
 
 			c.party_sessions[party_id.(string)] = session
@@ -329,7 +325,7 @@ func (c *PartyController) HandleDisconnect(s *melody.Session) {
 	}
 }
 
-func (c *PartyController) PushItem(s *melody.Session, raw_item json.RawMessage) {
+func (c *PartyController) PushSocket(s *melody.Session, raw_item json.RawMessage) {
 	item, err := party.UnmarshalItem(raw_item)
 
 	if err != nil {
@@ -375,4 +371,8 @@ func (c *PartyController) PushItem(s *melody.Session, raw_item json.RawMessage) 
 			}
 		}
 	}
+}
+
+func (c *PartyController) PushHTTP(context *gin.Context) {
+
 }
