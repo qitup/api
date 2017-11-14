@@ -1,15 +1,11 @@
 package party
 
-import (
-	"golang.org/x/oauth2"
-)
 
 type Player interface {
-	New(token *oauth2.Token)
-	Play(item Item) (error)
-	Pause(item Item) (error)
-	Next(item Item) (error)
-	Previous(item Item) (error)
+	Play(item []Item) (error)
+	Pause() (error)
+	Next() (error)
+	Previous() (error)
 	UpdateState() (error)
 }
 
