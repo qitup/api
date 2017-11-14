@@ -35,9 +35,10 @@ func ResumeQueue(conn redis.Conn, party string) (*Queue, error) {
 	}
 }
 
-func (q *Queue) Push(redis redis.Conn, party string, item Item) error {
+func (q *Queue) Push(conn redis.Conn, party string, item Item) error {
 	if serialized, err := json.Marshal(item); err == nil {
-		_, err := redis.Do("LPUSH", PARTY_PREFIX+party, serialized)
+		_, err := conn.Do("LPUSH", PARTY_PREFIX+party, serialized)
+
 		if err == nil {
 			q.Items = append(q.Items, item)
 		}

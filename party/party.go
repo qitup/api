@@ -10,7 +10,6 @@ import (
 	"github.com/VividCortex/multitick"
 	"time"
 	"log"
-	"dubclan/api/players"
 )
 
 const (
@@ -18,14 +17,15 @@ const (
 	JOIN_CODE_PREFIX = "join_code:"
 )
 
-var ConnectTokenIssued = errors.New("connect token currently issued for this user")
+var ConnectTokenIssued = errors.New("connect token is issued for this user")
 
 type Session struct {
+	Host models.User
 	Sessions map[*melody.Session]*melody.Session
 	Queue    *Queue
 	// Send true when a party becomes inactive
 	Inactive chan bool
-	Players []*player.Player
+	Players map[string]Player
 }
 
 func NewSession(queue *Queue, ticker *multitick.Ticker) (*Session) {
@@ -38,6 +38,11 @@ func NewSession(queue *Queue, ticker *multitick.Ticker) (*Session) {
 	go session.update(ticker.Subscribe())
 
 	return session
+}
+
+func (s *Session) InitializePlayer(service string, player Player) {
+
+	s.Players[service] = player
 }
 
 func (s *Session) Stop() {

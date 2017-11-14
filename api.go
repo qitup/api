@@ -10,7 +10,6 @@ import (
 	"github.com/markbates/goth"
 	"github.com/terev/goth/gothic"
 	"strings"
-	"github.com/gin-contrib/sessions"
 	"gopkg.in/dgrijalva/jwt-go.v3"
 	jwt_middleware "github.com/appleboy/gin-jwt"
 	"time"
@@ -18,17 +17,14 @@ import (
 	"dubclan/api/models"
 	"github.com/olahol/melody"
 	"encoding/json"
-	"net/url"
 	"log"
-	"gopkg.in/mgo.v2/bson"
 	"dubclan/api/party"
 	"encoding/base64"
-	"dubclan/api/players"
 	"github.com/unrolled/secure"
-	"github.com/VividCortex/multitick"
+	"dubclan/api/party/spotify"
 )
 
-func SecureHeaders(cli *cli.Context) gin.HandlerFunc {
+func secureHeaders(cli *cli.Context) gin.HandlerFunc {
 	secureMiddleware := secure.New(secure.Options{
 		IsDevelopment: cli.String("mode") == "debug" || cli.String("mode") == "test",
 
@@ -58,32 +54,36 @@ func SecureHeaders(cli *cli.Context) gin.HandlerFunc {
 	}()
 }
 
-func api(cli *cli.Context) error {
-	var signing_key []byte
-
+func decodeSigningKey(cli *cli.Context) ([]byte, error) {
 	key_data := cli.String("signing-key")
 
 	// Decode the signing key
 	if key, err := base64.StdEncoding.DecodeString(key_data); err == nil {
-		signing_key = key
+		return key, nil
 	} else {
-		return err
+		return nil, err
+	}
+}
+
+func api(cli *cli.Context) error {
+	signing_key, err := decodeSigningKey(cli)
+	if err != nil {
+		panic(err)
 	}
 
-	r := gin.Default()
-	r.Use(SecureHeaders(cli))
+	router := gin.Default()
+	router.Use(secureHeaders(cli))
 
 	m := melody.New()
 	m.Config.MaxMessageSize = 8192
 
-	PartySessions := map[string]*party.Session{}
+	redis_store := store.NewRedisStore(10, "tcp", "redis:6379", "")
 
-	pool := store.GetRedisPool(10, "tcp", "redis:6379", "")
-	redis_store, err := sessions.NewRedisStoreWithPool(pool, []byte(cli.String("session-secret")))
+	session_store, err := redis_store.GetSessionStore([]byte(cli.String("session-secret")))
 	if err != nil {
 		panic(err)
 	}
-	gothic.Store = redis_store
+	gothic.Store = session_store
 
 	session, err := mgo.Dial("mongodb://mongodb:27017")
 
@@ -92,16 +92,23 @@ func api(cli *cli.Context) error {
 	}
 	defer session.Close()
 
+	mongo_store := store.NewMongoStore(session, cli.String("database"))
+
 	index := mgo.Index{
 		Key:    []string{"join_code"},
 		Unique: true,
 	}
+
 	err = session.DB(cli.String("database")).C(models.PARTY_COLLECTION).EnsureIndex(index)
 	if err != nil {
 		panic(err)
 	}
 
-	r.Use(store.Middleware(session, cli))
+	// Initialize controllers
+	var (
+		user_controller  = controllers.NewUserController(mongo_store, redis_store)
+		party_controller = controllers.NewPartyController(mongo_store, redis_store)
+	)
 
 	var http_protocol string
 	if cli.Bool("secured") {
@@ -122,7 +129,7 @@ func api(cli *cli.Context) error {
 			cli.String("spotify-id"),
 			cli.String("spotify-secret"),
 			callback_url+"/auth/spotify/callback",
-			"streaming", "user-library-read", "user-read-private", "user-read-playback-state", "user-modify-playback-state", "user-read-currently-playing",
+			spotify.Scopes...,
 		),
 	)
 
@@ -145,42 +152,20 @@ func api(cli *cli.Context) error {
 		},
 	}
 
-	r.GET("/auth/:provider/callback", func(context *gin.Context) {
+	router.GET("/auth/:provider/callback", func(context *gin.Context) {
 		identity, err := gothic.CompleteUserAuth(context.Writer, context.Request)
 		if err != nil {
 			context.AbortWithError(500, err)
 			return
 		}
 
-		user, err := controllers.CompleteUserAuth(context, models.Identity(identity))
-
+		user, err := user_controller.CompleteUserAuth(context, models.Identity(identity))
 		if err != nil {
 			context.AbortWithError(500, err)
 			return
 		}
 
-		type APIClaims struct {
-			jwt.StandardClaims
-			AccessToken string `json:"access_token"`
-		}
-
-		claims := APIClaims{
-			StandardClaims: jwt.StandardClaims{
-				ExpiresAt: identity.ExpiresAt.Unix(),
-				Issuer:    "qitup.ca",
-				Subject:   user.ID.Hex(),
-			},
-		}
-
-		if identity.Provider == "spotify" {
-			claims.AccessToken = identity.AccessToken
-		}
-
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-
-		// Sign and get the complete encoded token as a string using the secret
-		token_blob, err := token.SignedString(signing_key)
-
+		token_blob, err := user.NewToken(cli.String("host"), signing_key)
 		if err != nil {
 			context.Error(err)
 		}
@@ -191,14 +176,14 @@ func api(cli *cli.Context) error {
 		})
 	})
 
-	r.GET("/logout/:provider", func(context *gin.Context) {
+	router.GET("/logout/:provider", func(context *gin.Context) {
 		gothic.Logout(context.Writer, context.Request)
 
 		context.Header("Location", "/")
 		context.Status(http.StatusTemporaryRedirect)
 	})
 
-	r.GET("/auth/:provider", func(context *gin.Context) {
+	router.GET("/auth/:provider", func(context *gin.Context) {
 		// try to get the user without re-authenticating
 		if _, err := gothic.CompleteUserAuth(context.Writer, context.Request); err == nil {
 			context.Next()
@@ -207,146 +192,47 @@ func api(cli *cli.Context) error {
 		}
 	})
 
-	party_group := r.Group("/party", auth_middleware.MiddlewareFunc())
+	party_group := router.Group("/party", auth_middleware.MiddlewareFunc())
 
-	// Party creation route
+	party_group.GET("/", party_controller.Get)
+
+	// party creation route
 	party_group.POST("/", func(context *gin.Context) {
-		conn := pool.Get()
-		defer conn.Close()
-
-		if err := conn.Err(); err != nil {
-			context.AbortWithError(500, err)
-			return
-		}
-
-		controllers.CreateParty(conn, context, cli)
+		party_controller.Create(context, cli)
 	})
 
 	party_group.GET("/join", func(context *gin.Context) {
-		conn := pool.Get()
-		defer conn.Close()
-
-		if err := conn.Err(); err != nil {
-			context.AbortWithError(500, err)
-			return
-		}
-
-		controllers.JoinParty(conn, context, cli, PartySessions)
+		party_controller.Join(context, cli)
 	})
 
 	party_group.GET("/connect/:code", func(context *gin.Context) {
-		conn := pool.Get()
-		defer conn.Close()
-
-		if err := conn.Err(); err != nil {
-			context.AbortWithError(500, err)
-			return
-		}
-
-		connect_token, _ := url.PathUnescape(context.Param("code"))
-
-		// Handle the request if the url is valid
-		if success, party_id, err := party.FinishConnect(conn, connect_token); success && err == nil {
-			if err := m.HandleRequestWithKeys(context.Writer, context.Request, gin.H{
-				"party_id": party_id,
-				"user_id":  context.GetString("userID"),
-			}); err != nil {
-				context.AbortWithError(500, err)
-			}
-		} else {
-			context.JSON(410, gin.H{
-				"type": "error",
-				"error": gin.H{
-					"code": "url_expired",
-					"msg":  "Socket URL has expired",
-				},
-			})
-		}
+		party_controller.Connect(context, m)
 	})
 
-	party_group.POST("/player/play", func(context *gin.Context) {
-		conn := pool.Get()
-		defer conn.Close()
-
-		if err := conn.Err(); err != nil {
-			context.AbortWithError(500, err)
-			return
-		}
-
-
-	})
-
-	ticker := multitick.NewTicker(5 * time.Second, 0)
-
-	// Add session to the party map
+	// Handle channel connections
 	m.HandleConnect(func(s *melody.Session) {
-		conn := pool.Get()
-		defer conn.Close()
-
-		if err := conn.Err(); err != nil {
-			return
-		}
-
-		party_id, _ := s.Get("party_id")
-
-		// Notify others this attendee has become active
-		if session, ok := PartySessions[party_id.(string)]; ok {
-			attendee_count := len(session.Sessions)
-			log.Println("Connected to party with", attendee_count, "other active attendees")
-
-			res, _ := json.Marshal(gin.H{
-				"type": "attendee.active",
-				"user": s.MustGet("user_id"),
-			})
-
-			for _, sess := range session.Sessions {
-				if writeErr := sess.Write(res); writeErr != nil {
-					log.Println(writeErr)
-				}
-			}
-
-			session.Sessions[s] = s
-		} else {
-			log.Println("Connected to party with 0 other active attendees")
-
-			if queue, err := party.ResumeQueue(conn, party_id.(string)); err == nil {
-				PartySessions[party_id.(string)] = party.NewSession(queue, ticker)
+		if channel, ok := s.Get("channel"); ok {
+			switch channel {
+			case "party":
+				party_controller.HandleConnect(s)
+				break
+			default:
+				log.Println("Connection to invalid channel detected, closing...")
+				s.Close()
 			}
 		}
-
-		// Say hello to the user when they connect
-		msg, _ := json.Marshal(gin.H{
-			"type": "hello",
-		})
-
-		s.Write([]byte(msg))
 	})
 
+	// Handle channel disconnections
 	m.HandleDisconnect(func(s *melody.Session) {
-		party_id, _ := s.Get("party_id")
-
-		if session, ok := PartySessions[party_id.(string)]; ok {
-			// Cleanup session from the party map
-			delete(session.Sessions, s)
-
-			attendee_count := len(session.Sessions)
-			log.Println("Left session with", attendee_count, "other active attendees")
-
-			if attendee_count == 0 {
-				session.Stop()
-				delete(PartySessions, party_id.(string))
-			} else {
-				// Notify others this attendee has disconnected
-				res, _ := json.Marshal(gin.H{
-					"type": "attendee.offline",
-					"user": s.MustGet("user_id"),
-				})
-
-				for _, sess := range session.Sessions {
-					if writeErr := sess.Write(res); writeErr != nil {
-						log.Println(writeErr)
-					}
-				}
+		if channel, ok := s.Get("channel"); ok {
+			switch channel {
+			case "party":
+				party_controller.HandleDisconnect(s)
+				break
+			default:
+				log.Println("Disconnect from invalid channel detected, closing...")
+				s.Close()
 			}
 		}
 	})
@@ -367,11 +253,6 @@ func api(cli *cli.Context) error {
 			return
 		}
 
-		party_id := s.MustGet("party_id")
-		session := PartySessions[party_id.(string)]
-
-		user_id := s.MustGet("user_id").(string)
-
 		if raw, ok := msg["type"]; ok {
 			var msg_type string
 			if err := json.Unmarshal(*raw, &msg_type); err != nil {
@@ -389,51 +270,10 @@ func api(cli *cli.Context) error {
 				s.Write([]byte(res))
 				break
 			case "queue.push":
-				conn := pool.Get()
-				defer conn.Close()
-
-				if err := conn.Err(); err != nil {
-					log.Println("Failed opening redis connection", err)
-					return
-				}
-
-				item, err := party.UnmarshalItem(*msg["item"])
-
-				if err != nil {
-					error_res, _ := json.Marshal(gin.H{
-						"type": "error",
-						"error": gin.H{
-							"code": "invalid_json",
-							"msg":  "Invalid JSON message",
-						},
-					})
-
-					s.Write([]byte(error_res))
-					return
-				}
-
-				item.Added(bson.ObjectIdHex(user_id))
-
-				if err := session.Queue.Push(conn, party_id.(string), item); err == nil {
-					event, err := json.Marshal(gin.H{
-						"item": item,
-						"type": msg_type,
-					})
-
-					if err != nil {
-						log.Println(err)
-						return
-					}
-
-					for _, sess := range session.Sessions {
-						if writeErr := sess.Write(event); writeErr != nil {
-							log.Println(writeErr)
-						}
-					}
-				}
+				party_controller.PushItem(s, *msg["item"])
 				break
 			case "player.event":
-				var event player.Event
+				var event party.Event
 				err := json.Unmarshal(*msg["event"], &event)
 
 				if err == nil {
@@ -441,7 +281,6 @@ func api(cli *cli.Context) error {
 				} else {
 					log.Println(err)
 				}
-
 				break
 			}
 		} else {
@@ -457,8 +296,8 @@ func api(cli *cli.Context) error {
 		}
 	})
 
-	me := r.Group("/me", auth_middleware.MiddlewareFunc())
-	me.GET("/", controllers.Me)
+	me := router.Group("/me", auth_middleware.MiddlewareFunc())
+	me.GET("/", user_controller.Me)
 
-	return r.Run(":" + cli.String("port"))
+	return router.Run(":" + cli.String("port"))
 }
