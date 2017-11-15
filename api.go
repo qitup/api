@@ -6,7 +6,7 @@ import (
 	"dubclan/api/store"
 	"dubclan/api/controllers"
 	"net/http"
-	provider_spotify "github.com/markbates/goth/providers/spotify"
+	spotify_provider "github.com/markbates/goth/providers/spotify"
 	"github.com/markbates/goth"
 	"github.com/terev/goth/gothic"
 	"strings"
@@ -127,7 +127,7 @@ func api(cli *cli.Context) error {
 	}
 
 	goth.UseProviders(
-		provider_spotify.New(
+		spotify_provider.New(
 			cli.String("spotify-id"),
 			cli.String("spotify-secret"),
 			callback_url+"/auth/spotify/callback",
@@ -172,10 +172,16 @@ func api(cli *cli.Context) error {
 			context.Error(err)
 		}
 
-		// Pass the JWT token, and identity access token to the client
-		context.JSON(200, gin.H{
+		res := gin.H{
 			"token": token_blob,
-		})
+		}
+
+		if identity.Provider == "spotify" {
+			res["access_token"] = identity.AccessToken
+		}
+
+		// Pass the JWT token, and identity access token to the client
+		context.JSON(200, res)
 	})
 
 	router.GET("/logout/:provider", func(context *gin.Context) {
