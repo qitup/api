@@ -235,6 +235,9 @@ func api(cli *cli.Context) error {
 
 	party_group.GET("/push", party_controller.PushHTTP)
 
+	party_group.GET("/player/play", party_controller.Play)
+
+
 	// Handle channel connections
 	m.HandleConnect(func(s *melody.Session) {
 		if channel, ok := s.Get("channel"); ok {

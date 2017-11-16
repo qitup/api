@@ -1,8 +1,10 @@
 package party
 
+import "dubclan/api/models"
+
 
 type Player interface {
-	Play(item []Item) (error)
+	Play(item []models.Item) (error)
 	Pause() (error)
 	Next() (error)
 	Previous() (error)

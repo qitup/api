@@ -8,8 +8,8 @@ import (
 	"errors"
 	"encoding/base64"
 	//"github.com/VividCortex/multitick"
-	"time"
-	"log"
+	"dubclan/api/party/spotify"
+	"golang.org/x/oauth2"
 )
 
 const (
@@ -20,10 +20,10 @@ const (
 var ConnectTokenIssued = errors.New("connect token is issued for this user")
 
 type Session struct {
-	Host models.User
+	Host     models.User
 	Sessions map[*melody.Session]*melody.Session
 	Queue    *Queue
-	Players map[string]Player
+	Players  map[string]Player
 }
 
 func NewSession(queue *Queue) (*Session) {
@@ -44,24 +44,37 @@ func (s *Session) Stop() {
 	//s.Inactive <- true
 }
 
-// Update the state of the players until a session becomes inactive
-func (s *Session) update(ticked <-chan time.Time) {
-	for {
-		select {
-		// Update states of our players
-		case tick := <-ticked:
-			log.Println("TICKED", tick)
-			//for _, player := range s.Players {
-			//	player.UpdateState()
-			//}
-			break
+func (s *Session) Pause() {
+	if player, ok := s.Players["spotify"]; ok {
+		player.Pause()
+	} else {
+		var player Player
 
-		//case done := <-s.Inactive:
-		//	if done {
-		//		return
-		//	}
-		//	break
-		}
+		player = spotify.New(
+			&oauth2.Token{
+				AccessToken: s.Host.GetIdentity("spotify").AccessToken,
+				TokenType:   "Bearer",
+			}, nil)
+
+		s.Players["spotify"] = player
+		player.Pause()
+	}
+}
+
+func (s *Session) Play() {
+	if player, ok := s.Players["spotify"]; ok {
+		player.Play(nil)
+	} else {
+		var player Player
+
+		player = spotify.New(
+			&oauth2.Token{
+				AccessToken: s.Host.GetIdentity("spotify").AccessToken,
+				TokenType:   "Bearer",
+			}, nil)
+
+		s.Players["spotify"] = player
+		player.Play(nil)
 	}
 }
 

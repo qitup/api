@@ -1,4 +1,4 @@
-package party
+package models
 
 import (
 	"time"
