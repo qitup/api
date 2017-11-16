@@ -399,6 +399,8 @@ func (c *PartyController) Play(context *gin.Context) {
 	if session, ok := c.party_sessions[party_id.Hex()]; ok {
 		if err := session.Play(); err != nil {
 			log.Println(err)
+		} else {
+			context.JSON(200, gin.H{})
 		}
 	}
 }
@@ -419,6 +421,8 @@ func (c *PartyController) Pause(context *gin.Context) {
 	if session, ok := c.party_sessions[party_id.Hex()]; ok {
 		if err := session.Pause(); err != nil {
 			log.Println(err)
+		} else {
+			context.JSON(200, gin.H{})
 		}
 	}
 }
