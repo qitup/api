@@ -20,16 +20,18 @@ const (
 var ConnectTokenIssued = errors.New("connect token is issued for this user")
 
 type Session struct {
-	Host     models.User
+	Party    *models.Party
 	Sessions map[*melody.Session]*melody.Session
 	Queue    *Queue
 	Players  map[string]Player
 }
 
-func NewSession(queue *Queue) (*Session) {
+func NewSession(party *models.Party, queue *Queue) (*Session) {
 	session := &Session{
+		Party:    party,
 		Sessions: make(map[*melody.Session]*melody.Session),
 		Queue:    queue,
+		Players:  make(map[string]Player),
 	}
 
 	return session
@@ -48,11 +50,9 @@ func (s *Session) Pause() {
 	if player, ok := s.Players["spotify"]; ok {
 		player.Pause()
 	} else {
-		var player Player
-
-		player = spotify.New(
+		var player Player = spotify.New(
 			&oauth2.Token{
-				AccessToken: s.Host.GetIdentity("spotify").AccessToken,
+				AccessToken: s.Party.Host.GetIdentity("spotify").AccessToken,
 				TokenType:   "Bearer",
 			}, nil)
 
@@ -69,7 +69,7 @@ func (s *Session) Play() {
 
 		player = spotify.New(
 			&oauth2.Token{
-				AccessToken: s.Host.GetIdentity("spotify").AccessToken,
+				AccessToken: s.Party.Host.GetIdentity("spotify").AccessToken,
 				TokenType:   "Bearer",
 			}, nil)
 
