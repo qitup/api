@@ -11,7 +11,8 @@ import (
 type Item interface {
 	Added(by bson.ObjectId)
 	UpdateState(state ItemState)
-	GetType()string
+	GetType()(string)
+	GetPlayerType()(string)
 }
 
 type ItemState struct {
@@ -78,6 +79,10 @@ func (i *SpotifyTrack) Added(by bson.ObjectId) {
 
 func (i *SpotifyTrack) GetType() string {
 	return i.Type
+}
+
+func (i *SpotifyTrack) GetPlayerType() (string){
+	return "spotify"
 }
 
 func (i *SpotifyTrack) UpdateState(new ItemState) {

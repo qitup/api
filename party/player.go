@@ -8,6 +8,7 @@ type Player interface {
 	Pause() (error)
 	Resume() (error)
 	Next() (error)
+	HasTracks() (bool)
 	Previous() (error)
 	UpdateState() (error)
 }

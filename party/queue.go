@@ -56,7 +56,6 @@ func (q *Queue) GetNextPlayableList()[]models.Item{
 			}
 		}
 	}
-	log.Println(items)
 	return items
 }
 
