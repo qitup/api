@@ -19,6 +19,7 @@ type ItemState struct {
 }
 
 type BaseItem struct {
+	Item
 	Type    string        `json:"type" bson:"type"`
 	AddedBy bson.ObjectId `json:"added_by" bson:"added_by,omitempty"`
 	AddedAt time.Time     `json:"added_at" bson:"added_at"`
@@ -68,4 +69,17 @@ func UnmarshalItem(b []byte) (Item, error) {
 type SpotifyTrack struct {
 	BaseItem
 	URI spotify.URI `json:"uri" bson:"uri"`
+}
+
+func (i *SpotifyTrack) Added(by bson.ObjectId) {
+	i.AddedAt = time.Now()
+	i.AddedBy = by
+}
+
+func (i *SpotifyTrack) GetType() string {
+	return i.Type
+}
+
+func (i *SpotifyTrack) UpdateState(new ItemState) {
+	i.State = new
 }

@@ -16,7 +16,7 @@ services:
       PORT: "8081"
       SECURED: "false"
       PUBLIC: "false"
-      HOST: "192.168.0.17"
+      HOST: "localhost"
       SIGNING_KEY:
       SPOTIFY_ID:
       SPOTIFY_SECRET:

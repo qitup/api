@@ -33,18 +33,31 @@ func New(token *oauth2.Token, device_id *string) *SpotifyPlayer {
 	}
 }
 
-func (p *SpotifyPlayer) Play(item []models.Item) (error) {
-	//opt := spotify.PlayOptions{
-	//
-	//}
-	//
-	//p.client.PlayOpt(spotify.PlayOptions{})
+func (p *SpotifyPlayer) Play(items []models.Item) (error) {
+	uris := []spotify.URI{}
+	for _, item := range items {
+		switch item.(type) {
+		case *models.SpotifyTrack:
+			track := item.(*models.SpotifyTrack)
+			uris = append(uris, track.URI)
+			break
+		}
+	}
+
+	opt := spotify.PlayOptions{nil, nil, uris, nil}
+
+	if err := p.client.PlayOpt(&opt); err != nil {
+		return err
+	}
+
 	p.StartPolling(5 * time.Second)
 	return nil
 }
 
 func (p *SpotifyPlayer) Pause() (error) {
-	//p.client.PauseOpt()
+	if err := p.client.Pause(); err != nil {
+		return err
+	}
 	p.StopPolling()
 	return nil
 }

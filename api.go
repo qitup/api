@@ -235,16 +235,10 @@ func api(cli *cli.Context) error {
 
 	party_group.GET("/push", party_controller.PushHTTP)
 
-	player_group := router.Group("/:id/player", auth_middleware.MiddlewareFunc())
+	party_group.GET("/player/play", party_controller.Play)
 
-	player_group.POST("/play", func(context *gin.Context) {
-		party_controller.Play(context)
-	})
+	party_group.GET("/player/pause", party_controller.Pause)
 
-	//player_group.POST("/pause", func(context *gin.Context) {
-	//	party_id := context.Param("party_id")
-	//
-	//})
 
 	// Handle channel connections
 	m.HandleConnect(func(s *melody.Session) {
