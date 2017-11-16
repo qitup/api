@@ -44,6 +44,8 @@ func (p *SpotifyPlayer) Play(items []models.Item) (error) {
 		}
 	}
 
+	log.Println(uris)
+
 	opt := spotify.PlayOptions{nil, nil, uris, nil}
 
 	if err := p.client.PlayOpt(&opt); err != nil {
@@ -92,11 +94,11 @@ func (p *SpotifyPlayer) poll() {
 		select {
 		// Update states of our players
 		case <-p.ticker.C:
-			if state, err := p.client.PlayerState(); err != nil {
+			if _, err := p.client.PlayerState(); err != nil {
 				log.Println("Failed getting spotify player state ", err)
 				return
 			} else {
-				log.Println(state.CurrentlyPlaying)
+				//log.Println(state.CurrentlyPlaying)
 			}
 
 			//for _, player := range s.Players {

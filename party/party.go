@@ -46,9 +46,11 @@ func (s *Session) Stop() {
 	//s.Inactive <- true
 }
 
-func (s *Session) Pause() {
+func (s *Session) Pause() (error){
 	if player, ok := s.Players["spotify"]; ok {
-		player.Pause()
+		if err := player.Pause(); err != nil {
+			return err
+		}
 	} else {
 		var player Player = spotify.New(
 			&oauth2.Token{
@@ -57,11 +59,14 @@ func (s *Session) Pause() {
 			}, nil)
 
 		s.Players["spotify"] = player
-		player.Pause()
+		if err := player.Pause(); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (s *Session) Play() {
+func (s *Session) Play() (error){
 	if player, ok := s.Players["spotify"]; ok {
 		items := s.Queue.GetNextPlayableList()
 		player.Play(items)
@@ -76,8 +81,11 @@ func (s *Session) Play() {
 
 		s.Players["spotify"] = player
 		items := s.Queue.GetNextPlayableList()
-		player.Play(items)
+		if err := player.Play(items); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func InitiateConnect(redis redis.Conn, party models.Party, attendee models.Attendee) (string, error) {
