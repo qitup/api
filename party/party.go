@@ -10,7 +10,6 @@ import (
 	//"github.com/VividCortex/multitick"
 	"dubclan/api/party/spotify"
 	"golang.org/x/oauth2"
-	"log"
 )
 
 const (
