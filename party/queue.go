@@ -36,9 +36,9 @@ func ResumeQueue(conn redis.Conn, party string) (*Queue, error) {
 	}
 }
 
-func (q *Queue) GetNextPlayableList()[]Item{
+func (q *Queue) GetNextPlayableList()[]models.Item{
 	first_type := ""
-	items := []Item{}
+	items := []models.Item{}
 	for _, item := range q.Items {
 		if first_type == "" {
 			first_type = item.GetType()
@@ -47,7 +47,7 @@ func (q *Queue) GetNextPlayableList()[]Item{
 			if item_type := item.GetType(); item_type == first_type {
 				items = append(items, item)
 			} else {
-				return items
+				break
 			}
 		}
 	}

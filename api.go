@@ -235,13 +235,10 @@ func api(cli *cli.Context) error {
 
 	party_group.GET("/push", party_controller.PushHTTP)
 
-	player_group := router.Group("/:party_id/player", auth_middleware.MiddlewareFunc())
+	player_group := router.Group("/:id/player", auth_middleware.MiddlewareFunc())
 
 	player_group.POST("/play", func(context *gin.Context) {
-		s := party_controller.GetByID(context)
-
-		s.Play()
-
+		party_controller.Play(context)
 	})
 
 	//player_group.POST("/pause", func(context *gin.Context) {

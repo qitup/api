@@ -26,15 +26,6 @@ func NewPartyController(mongo *store.MongoStore, redis *store.RedisStore) PartyC
 	}
 }
 
-func (c *PartyController) GetByID(context *gin.Context)*party.Session{
-
-	party_id := context.Query("party_id")
-
-	s := c.party_sessions[party_id]
-
-	return s
-}
-
 func (c *PartyController) Get(context *gin.Context) {
 	session, db := c.Mongo.DB()
 	defer session.Close()

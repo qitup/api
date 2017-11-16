@@ -40,14 +40,6 @@ func (s *Session) InitializePlayer(service string, player Player) {
 	s.Players[service] = player
 }
 
-func (s *Session) Play(player_type string) {
-	p := s.Players[player_type]
-
-	items := s.Queue.GetNextPlayableList()
-
-
-}
-
 func (s *Session) Stop() {
 	//s.Inactive <- true
 }
@@ -71,7 +63,8 @@ func (s *Session) Pause() {
 
 func (s *Session) Play() {
 	if player, ok := s.Players["spotify"]; ok {
-		player.Play(nil)
+		items := s.Queue.GetNextPlayableList()
+		player.Play(items)
 	} else {
 		var player Player
 
@@ -82,7 +75,8 @@ func (s *Session) Play() {
 			}, nil)
 
 		s.Players["spotify"] = player
-		player.Play(nil)
+		items := s.Queue.GetNextPlayableList()
+		player.Play(items)
 	}
 }
 
