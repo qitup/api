@@ -52,11 +52,11 @@ func (u *User) Save(db *mgo.Database) error {
 	return err
 }
 
-func UserByID(db *mgo.Database, id bson.ObjectId) (User, error) {
+func UserByID(db *mgo.Database, id bson.ObjectId) (*User, error) {
 	var user User
 	err := db.C(USER_COLLECTION).FindId(id).One(&user)
 
-	return user, err
+	return &user, err
 }
 
 func UpdateUserByIdentity(db *mgo.Database, identity Identity) (*User, error) {

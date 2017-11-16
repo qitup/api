@@ -256,16 +256,18 @@ func (c *PartyController) HandleConnect(s *melody.Session) {
 	}
 	defer conn.Close()
 
-	party_id, _ := s.Get("party_id")
+	party_id := s.MustGet("party_id").(string)
+
+	user_id := s.MustGet("user_id").(string)
 
 	// Notify others this attendee has become active
-	if session, ok := c.party_sessions[party_id.(string)]; ok {
+	if session, ok := c.party_sessions[party_id]; ok {
 		attendee_count := len(session.Sessions)
 		log.Println("Connected to party with", attendee_count, "other active attendees")
 
 		res, _ := json.Marshal(gin.H{
 			"type": "attendee.active",
-			"user": s.MustGet("user_id"),
+			"user": user_id,
 		})
 
 		for _, sess := range session.Sessions {
@@ -277,12 +279,16 @@ func (c *PartyController) HandleConnect(s *melody.Session) {
 		session.Sessions[s] = s
 	} else {
 		log.Println("Connected to party with 0 other active attendees")
+		session, db := c.Mongo.DB()
+		defer session.Close()
 
-		if queue, err := party.ResumeQueue(conn, party_id.(string)); err == nil {
-			session := party.NewSession(queue)
-			session.Sessions[s] = s
+		if party_record, err := models.PartyByID(db, bson.ObjectIdHex(party_id)); err == nil {
+			if queue, err := party.ResumeQueue(conn, party_id); err == nil {
+				session := party.NewSession(party_record, queue)
+				session.Sessions[s] = s
 
-			c.party_sessions[party_id.(string)] = session
+				c.party_sessions[party_id] = session
+			}
 		}
 	}
 
@@ -385,7 +391,7 @@ func (c *PartyController) Play(context *gin.Context) {
 			"type": "error",
 			"error": gin.H{
 				"code": "invalid_party_id",
-				"msg": "Invalid party id",
+				"msg":  "Invalid party id",
 			},
 		})
 	}
