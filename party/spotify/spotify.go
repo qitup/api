@@ -18,6 +18,7 @@ type SpotifyPlayer struct {
 	client         spotify.Client
 	playback_state *spotify.PlayerState
 	device_id      *string
+	current_tracks []spotify.URI
 
 	// Send true when a party becomes inactive
 	stop   chan bool
@@ -51,7 +52,7 @@ func (p *SpotifyPlayer) Play(items []models.Item) (error) {
 	if err := p.client.PlayOpt(&opt); err != nil {
 		return err
 	}
-
+	p.current_tracks = uris
 	p.StartPolling(5 * time.Second)
 	return nil
 }
@@ -79,6 +80,14 @@ func (p *SpotifyPlayer) StopPolling() {
 		p.stop <- true
 		p.ticker = nil
 	}
+}
+
+func (p *SpotifyPlayer) Resume() (error){
+	if err := p.client.Play(); err != nil {
+		return err
+	}
+	p.StartPolling(5 * time.Second)
+	return nil
 }
 
 func (p *SpotifyPlayer) StartPolling(interval time.Duration) {

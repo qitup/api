@@ -7,8 +7,13 @@ import (
 	"dubclan/api/models"
 )
 
+type State struct {
+	cursor int
+	currentItem *models.Item
+}
 type Queue struct {
 	Items []models.Item `json:"items" bson:"items"`
+	State State
 }
 
 func NewQueue() Queue {

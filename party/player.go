@@ -6,6 +6,7 @@ import "dubclan/api/models"
 type Player interface {
 	Play(item []models.Item) (error)
 	Pause() (error)
+	Resume() (error)
 	Next() (error)
 	Previous() (error)
 	UpdateState() (error)
