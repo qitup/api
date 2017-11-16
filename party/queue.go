@@ -35,6 +35,24 @@ func ResumeQueue(conn redis.Conn, party string) (*Queue, error) {
 	}
 }
 
+func (q *Queue) GetNextPlayableList()[]Item{
+	first_type := ""
+	items := []Item{}
+	for _, item := range q.Items {
+		if first_type == "" {
+			first_type = item.GetType()
+			items = append(items, item)
+		} else {
+			if item_type := item.GetType(); item_type == first_type {
+				items = append(items, item)
+			} else {
+				return items
+			}
+		}
+	}
+	return items
+}
+
 func (q *Queue) Push(conn redis.Conn, party string, item Item) error {
 	if serialized, err := json.Marshal(item); err == nil {
 		_, err := conn.Do("LPUSH", PARTY_PREFIX+party, serialized)

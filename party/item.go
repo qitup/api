@@ -11,6 +11,7 @@ import (
 type Item interface {
 	Added(by bson.ObjectId)
 	UpdateState(state ItemState)
+	GetType()string
 }
 
 type ItemState struct {
@@ -27,6 +28,10 @@ type BaseItem struct {
 func (i *BaseItem) Added(by bson.ObjectId) {
 	i.AddedAt = time.Now()
 	i.AddedBy = by
+}
+
+func (i *BaseItem) GetType() string {
+	return i.Type
 }
 
 func (i *BaseItem) UpdateState(new ItemState) {

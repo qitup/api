@@ -40,6 +40,14 @@ func (s *Session) InitializePlayer(service string, player Player) {
 	s.Players[service] = player
 }
 
+func (s *Session) Play(player_type string) {
+	p := s.Players[player_type]
+
+	items := s.Queue.GetNextPlayableList()
+
+
+}
+
 func (s *Session) Stop() {
 	//s.Inactive <- true
 }
