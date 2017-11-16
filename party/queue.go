@@ -4,15 +4,16 @@ import (
 	"github.com/garyburd/redigo/redis"
 	"encoding/json"
 	"log"
+	"dubclan/api/models"
 )
 
 type Queue struct {
-	Items []Item `json:"items" bson:"items"`
+	Items []models.Item `json:"items" bson:"items"`
 }
 
 func NewQueue() Queue {
 	return Queue{
-		Items: []Item{},
+		Items: []models.Item{},
 	}
 }
 
@@ -21,7 +22,7 @@ func ResumeQueue(conn redis.Conn, party string) (*Queue, error) {
 		queue := NewQueue()
 
 		for i := len(list) - 1; i >= 0; i-- {
-			if item, err := UnmarshalItem([]byte(list[i])); err == nil {
+			if item, err := models.UnmarshalItem([]byte(list[i])); err == nil {
 				queue.Items = append(queue.Items, item)
 			} else {
 				log.Println(err)
@@ -53,7 +54,7 @@ func (q *Queue) GetNextPlayableList()[]Item{
 	return items
 }
 
-func (q *Queue) Push(conn redis.Conn, party string, item Item) error {
+func (q *Queue) Push(conn redis.Conn, party string, item models.Item) error {
 	if serialized, err := json.Marshal(item); err == nil {
 		_, err := conn.Do("LPUSH", PARTY_PREFIX+party, serialized)
 

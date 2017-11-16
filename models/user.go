@@ -140,3 +140,13 @@ func (u *User) AssumeIdentity(db *mgo.Database, identity Identity) error {
 
 	return u.Save(db)
 }
+
+func (u *User) GetIdentity(provider string) *Identity {
+	for _, identity := range u.Identities {
+		if identity.Provider == provider {
+			return identity
+		}
+	}
+
+	return nil
+}

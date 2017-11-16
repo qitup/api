@@ -335,7 +335,7 @@ func (c *PartyController) HandleDisconnect(s *melody.Session) {
 }
 
 func (c *PartyController) PushSocket(s *melody.Session, raw_item json.RawMessage) {
-	item, err := party.UnmarshalItem(raw_item)
+	item, err := models.UnmarshalItem(raw_item)
 
 	if err != nil {
 		error_res, _ := json.Marshal(gin.H{
@@ -384,4 +384,22 @@ func (c *PartyController) PushSocket(s *melody.Session, raw_item json.RawMessage
 
 func (c *PartyController) PushHTTP(context *gin.Context) {
 
+}
+
+func (c *PartyController) Play(context *gin.Context) {
+	party_id := bson.ObjectIdHex(context.Query("id"))
+
+	if !party_id.Valid() {
+		context.AbortWithStatusJSON(400, gin.H{
+			"type": "error",
+			"error": gin.H{
+				"code": "invalid_party_id",
+				"msg": "Invalid party id",
+			},
+		})
+	}
+
+	if session, ok := c.party_sessions[party_id.Hex()]; ok {
+		session.Play()
+	}
 }
