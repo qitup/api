@@ -79,7 +79,7 @@ func (p *SpotifyPlayer) Previous() (error) {
 	panic("implement me")
 }
 
-func (p *SpotifyPlayer) HasTracks() (bool){
+func (p *SpotifyPlayer) HasItems() (bool){
 	return p.cursor != -1 && p.cursor <= len(p.current_tracks)
 }
 

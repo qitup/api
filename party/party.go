@@ -7,7 +7,6 @@ import (
 	"dubclan/api/models"
 	"errors"
 	"encoding/base64"
-	//"github.com/VividCortex/multitick"
 	"dubclan/api/party/spotify"
 	"golang.org/x/oauth2"
 )
@@ -20,10 +19,10 @@ const (
 var ConnectTokenIssued = errors.New("connect token is issued for this user")
 
 type Session struct {
-	Party    *models.Party
-	Sessions map[*melody.Session]*melody.Session
-	Queue    *Queue
-	Players  map[string]Player
+	Party         *models.Party
+	Sessions      map[*melody.Session]*melody.Session
+	Queue         *Queue
+	Players       map[string]Player
 	CurrentPlayer Player
 }
 
@@ -47,7 +46,7 @@ func (s *Session) Stop() {
 	//s.Inactive <- true
 }
 
-func (s *Session) Pause() (error){
+func (s *Session) Pause() (error) {
 	if player, ok := s.Players["spotify"]; ok {
 		if err := player.Pause(); err != nil {
 			return err
@@ -67,7 +66,7 @@ func (s *Session) Pause() (error){
 	return nil
 }
 
-func (s *Session) Next() (error){
+func (s *Session) Next() (error) {
 	if player, ok := s.Players["spotify"]; ok {
 		if err := player.Next(); err != nil {
 			return err
@@ -87,9 +86,9 @@ func (s *Session) Next() (error){
 	return nil
 }
 
-func (s *Session) Play() (error){
+func (s *Session) Play() (error) {
 	if s.CurrentPlayer != nil {
-		if !s.CurrentPlayer.HasTracks() {
+		if !s.CurrentPlayer.HasItems() {
 			items := s.Queue.GetNextPlayableList()
 			if player := s.GetPlayerForItem(items[0]); player != s.CurrentPlayer {
 				s.CurrentPlayer = player
@@ -111,12 +110,11 @@ func (s *Session) Play() (error){
 			s.Queue.State.cursor = 0
 		}
 
-
 	}
 	return nil
 }
 
-func (s *Session) GetPlayerForItem(item models.Item) (player Player){
+func (s *Session) GetPlayerForItem(item models.Item) (player Player) {
 	player_type := item.GetPlayerType()
 	if s.Players[player_type] != nil {
 		return s.Players[player_type]
