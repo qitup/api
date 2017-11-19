@@ -2,14 +2,13 @@ package party
 
 import "dubclan/api/models"
 
-
 type Player interface {
 	Play(item []models.Item) (error)
 	Pause() (error)
 	Resume() (error)
 	Next() (error)
-	HasTracks() (bool)
 	Previous() (error)
+	HasItems() (bool)
 	UpdateState() (error)
 }
 
