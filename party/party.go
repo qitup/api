@@ -24,6 +24,7 @@ type Session struct {
 	Sessions map[*melody.Session]*melody.Session
 	Queue    *Queue
 	Players  map[string]Player
+	CurrentPlayer Player
 }
 
 func NewSession(party *models.Party, queue *Queue) (*Session) {
@@ -66,26 +67,74 @@ func (s *Session) Pause() (error){
 	return nil
 }
 
-func (s *Session) Play() (error){
+func (s *Session) Next() (error){
 	if player, ok := s.Players["spotify"]; ok {
-		items := s.Queue.GetNextPlayableList()
-		player.Play(items)
+		if err := player.Next(); err != nil {
+			return err
+		}
 	} else {
-		var player Player
-
-		player = spotify.New(
+		var player Player = spotify.New(
 			&oauth2.Token{
 				AccessToken: s.Party.Host.GetIdentity("spotify").AccessToken,
 				TokenType:   "Bearer",
 			}, nil)
 
 		s.Players["spotify"] = player
-		items := s.Queue.GetNextPlayableList()
-		if err := player.Play(items); err != nil {
+		if err := player.Next(); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (s *Session) Play() (error){
+	if s.CurrentPlayer != nil {
+		if !s.CurrentPlayer.HasTracks() {
+			items := s.Queue.GetNextPlayableList()
+			if player := s.GetPlayerForItem(items[0]); player != s.CurrentPlayer {
+				s.CurrentPlayer = player
+			}
+			s.CurrentPlayer.Play(items)
+		} else {
+			s.CurrentPlayer.Resume()
+		}
+	} else {
+		items := s.Queue.GetNextPlayableList()
+		player := s.GetPlayerForItem(items[0])
+
+		s.CurrentPlayer = player
+
+		if err := player.Play(items); err != nil {
+			return err
+		} else {
+			s.Queue.State.currentItem = &items[0]
+			s.Queue.State.cursor = 0
+		}
+
+
+	}
+	return nil
+}
+
+func (s *Session) GetPlayerForItem(item models.Item) (player Player){
+	player_type := item.GetPlayerType()
+	if s.Players[player_type] != nil {
+		return s.Players[player_type]
+	} else {
+		var player Player
+		switch player_type {
+		case "spotify":
+			player = spotify.New(
+				&oauth2.Token{
+					AccessToken: s.Party.Host.GetIdentity("spotify").AccessToken,
+					TokenType:   "Bearer",
+				}, nil)
+			break
+		}
+		s.Players[player_type] = player
+		return player
+	}
+
 }
 
 func InitiateConnect(redis redis.Conn, party models.Party, attendee models.Attendee) (string, error) {

@@ -426,3 +426,25 @@ func (c *PartyController) Pause(context *gin.Context) {
 		}
 	}
 }
+
+func (c *PartyController) Next(context *gin.Context) {
+	party_id := bson.ObjectIdHex(context.Query("id"))
+
+	if !party_id.Valid() {
+		context.AbortWithStatusJSON(400, gin.H{
+			"type": "error",
+			"error": gin.H{
+				"code": "invalid_party_id",
+				"msg": "Invalid party id",
+			},
+		})
+	}
+
+	if session, ok := c.party_sessions[party_id.Hex()]; ok {
+		if err := session.Next(); err != nil {
+			log.Println(err)
+		} else {
+			context.JSON(200, gin.H{})
+		}
+	}
+}
