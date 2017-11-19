@@ -7,6 +7,9 @@ import (
 	"gopkg.in/dgrijalva/jwt-go.v3"
 	"strings"
 	"github.com/Pallinder/go-randomdata"
+	"github.com/terev/goth"
+	"golang.org/x/oauth2"
+	"errors"
 )
 
 type APIClaims struct {
@@ -149,4 +152,44 @@ func (u *User) GetIdentity(provider string) *Identity {
 	}
 
 	return nil
+}
+
+func (i *Identity) GetAccessToken(db *mgo.Database, user *User) (string, error) {
+	if i.AccessToken != "" {
+		if time.Now().After(i.ExpiresAt) {
+			if provider, err := goth.GetProvider(i.Provider); err == nil {
+				new_token, err := provider.RefreshToken(i.RefreshToken)
+				if err != nil {
+					return "", err
+				}
+
+				i.AccessToken = new_token.AccessToken
+				i.ExpiresAt = new_token.Expiry
+				if err := user.Save(db); err != nil {
+					return "", err
+				}
+			} else {
+				return "", err
+			}
+		} else {
+			return i.AccessToken, nil
+		}
+	} else if i.RefreshToken != "" {
+		if provider, err := goth.GetProvider(i.Provider); err == nil {
+			new_token, err := provider.RefreshToken(i.RefreshToken)
+			if err != nil {
+				return "", err
+			}
+
+			i.AccessToken = new_token.AccessToken
+			i.ExpiresAt = new_token.Expiry
+			if err := user.Save(db); err != nil {
+				return "", err
+			}
+		} else {
+			return "", err
+		}
+	} else {
+		return "", errors.New("no valid access token")
+	}
 }
