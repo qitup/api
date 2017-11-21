@@ -12,6 +12,7 @@ import (
 	"github.com/olahol/melody"
 	"encoding/json"
 	"log"
+	"github.com/garyburd/redigo/redis"
 )
 
 type PartyController struct {
@@ -91,15 +92,10 @@ func (c *PartyController) Create(context *gin.Context, cli *cli.Context) {
 		}
 		defer conn.Close()
 
-		if queue, err := party.ResumeQueue(conn, party_record.ID.Hex()); err == nil {
-			session := party.NewSession(&party_record, queue, c.Mongo, c.Redis)
+		queue := party.NewQueue()
+		session := party.NewSession(&party_record, queue, c.Mongo, c.Redis)
 
-			c.party_sessions[party_record.ID.Hex()] = session
-			log.Println(c.party_sessions)
-		} else {
-			context.AbortWithError(500, err)
-			return
-		}
+		c.party_sessions[party_record.ID.Hex()] = session
 
 		connect_token, err := party.InitiateConnect(conn, party_record, attendee)
 
@@ -122,7 +118,7 @@ func (c *PartyController) Create(context *gin.Context, cli *cli.Context) {
 			context.JSON(201, gin.H{
 				"url":   connect_url + "/party/connect/" + url.PathEscape(connect_token),
 				"party": party_record,
-				"queue": party.NewQueue(),
+				"queue": queue,
 			})
 			return
 		case party.ConnectTokenIssued:
@@ -210,6 +206,15 @@ func (c *PartyController) Join(context *gin.Context, cli *cli.Context) {
 			session := party.NewSession(party_record, queue, c.Mongo, c.Redis)
 
 			c.party_sessions[party_record.ID.Hex()] = session
+			res["queue"] = queue
+		} else if err == redis.ErrNil {
+			queue = party.NewQueue()
+			session := party.NewSession(party_record, queue, c.Mongo, c.Redis)
+
+			c.party_sessions[party_record.ID.Hex()] = session
+			res["queue"] = queue
+		} else {
+			context.AbortWithError(500, err)
 		}
 
 		context.JSON(200, res)

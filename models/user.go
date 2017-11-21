@@ -176,7 +176,7 @@ func (i *RefreshableIdentity) refresh(provider goth.Provider) (*oauth2.Token, er
 	return new_token, nil
 }
 
-func (i *RefreshableIdentity) GetToken(provider goth.Provider) (*oauth2.Token, error) {
+func (i *RefreshableIdentity) GetToken(provider goth.Provider) (*oauth2.Token, bool, error) {
 	current := &oauth2.Token{
 		AccessToken: i.AccessToken,
 		Expiry:      i.ExpiresAt,
@@ -184,7 +184,7 @@ func (i *RefreshableIdentity) GetToken(provider goth.Provider) (*oauth2.Token, e
 	}
 
 	if current.Valid() {
-		return current, nil
+		return current, false, nil
 	} else {
 		new_token, err := i.refresh(provider)
 
@@ -192,9 +192,9 @@ func (i *RefreshableIdentity) GetToken(provider goth.Provider) (*oauth2.Token, e
 		defer session.Close()
 
 		if err := i.user.Save(db); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 
-		return new_token, err
+		return new_token, true, err
 	}
 }

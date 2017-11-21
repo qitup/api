@@ -48,7 +48,7 @@ type SpotifyPlayer struct {
 }
 
 func New(identity *models.RefreshableIdentity, device_id *string) (*SpotifyPlayer, error) {
-	token, err := identity.GetToken(provider)
+	token, _, err := identity.GetToken(provider)
 
 	if err != nil {
 		return nil, err
@@ -181,12 +181,17 @@ func (p *SpotifyPlayer) refreshClient() (error) {
 	// Hold lock to prevent other sessions from being 401'ed
 	log.Println("LOCKING")
 	p.refreshing.Lock()
-	new_token, err := p.identity.GetToken(provider)
+	new_token, changed, err := p.identity.GetToken(provider)
 	if err != nil {
 		p.refreshing.Unlock()
 		return err
 	}
-	p.client = authenticator.NewClient(new_token)
+
+	// Only update the client object after token refresh
+	if changed {
+		p.client = authenticator.NewClient(new_token)
+	}
+
 	p.refreshing.Unlock()
 	return nil
 }

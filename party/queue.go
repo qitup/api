@@ -16,8 +16,8 @@ type Queue struct {
 	State State
 }
 
-func NewQueue() Queue {
-	return Queue{
+func NewQueue() *Queue {
+	return &Queue{
 		Items: []models.Item{},
 	}
 }
@@ -35,7 +35,7 @@ func ResumeQueue(conn redis.Conn, id string) (*Queue, error) {
 			}
 		}
 
-		return &queue, nil
+		return queue, nil
 	} else {
 		return nil, err
 	}
