@@ -8,17 +8,19 @@ import (
 	"errors"
 	"encoding/base64"
 	"dubclan/api/party/spotify"
-	"golang.org/x/oauth2"
+	"dubclan/api/store"
 )
 
 const (
-	PARTY_PREFIX     = "party:"
+	QUEUE_PREFIX     = "queue:"
 	JOIN_CODE_PREFIX = "join_code:"
 )
 
 var ConnectTokenIssued = errors.New("connect token is issued for this user")
 
 type Session struct {
+	Mongo         *store.MongoStore
+	Redis         *store.RedisStore
 	Party         *models.Party
 	Sessions      map[*melody.Session]*melody.Session
 	Queue         *Queue
@@ -26,8 +28,10 @@ type Session struct {
 	CurrentPlayer Player
 }
 
-func NewSession(party *models.Party, queue *Queue) (*Session) {
+func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redis *store.RedisStore) (*Session) {
 	session := &Session{
+		Mongo:    mongo,
+		Redis:    redis,
 		Party:    party,
 		Sessions: make(map[*melody.Session]*melody.Session),
 		Queue:    queue,
@@ -47,42 +51,34 @@ func (s *Session) Stop() {
 }
 
 func (s *Session) Pause() (error) {
-	if player, ok := s.Players["spotify"]; ok {
-		if err := player.Pause(); err != nil {
-			return err
-		}
-	} else {
-		var player Player = spotify.New(
-			&oauth2.Token{
-				AccessToken: s.Party.Host.GetIdentity("spotify").AccessToken,
-				TokenType:   "Bearer",
-			}, nil)
-
-		s.Players["spotify"] = player
-		if err := player.Pause(); err != nil {
-			return err
-		}
+	if s.CurrentPlayer != nil && s.CurrentPlayer.HasItems() {
+		return s.CurrentPlayer.Pause()
 	}
+
 	return nil
 }
 
 func (s *Session) Next() (error) {
-	if player, ok := s.Players["spotify"]; ok {
-		if err := player.Next(); err != nil {
-			return err
-		}
-	} else {
-		var player Player = spotify.New(
-			&oauth2.Token{
-				AccessToken: s.Party.Host.GetIdentity("spotify").AccessToken,
-				TokenType:   "Bearer",
-			}, nil)
+	if s.CurrentPlayer != nil {
+		if !s.CurrentPlayer.HasItems() {
+			items := s.Queue.GetNextPlayableList()
+			if len(items) > 0 {
+				player, err := s.GetPlayerForItem(items[0])
+				if err != nil {
+					return err
+				} else if player != s.CurrentPlayer {
+					s.CurrentPlayer = player
+				}
 
-		s.Players["spotify"] = player
-		if err := player.Next(); err != nil {
-			return err
+				return s.CurrentPlayer.Play(items)
+			} else {
+				s.CurrentPlayer = nil
+			}
+		} else {
+			return s.CurrentPlayer.Next()
 		}
 	}
+
 	return nil
 }
 
@@ -90,47 +86,70 @@ func (s *Session) Play() (error) {
 	if s.CurrentPlayer != nil {
 		if !s.CurrentPlayer.HasItems() {
 			items := s.Queue.GetNextPlayableList()
-			if player := s.GetPlayerForItem(items[0]); player != s.CurrentPlayer {
-				s.CurrentPlayer = player
+			if len(items) > 0 {
+				player, err := s.GetPlayerForItem(items[0])
+				if err != nil {
+					return err
+				} else if player != s.CurrentPlayer {
+					s.CurrentPlayer = player
+				}
+
+				return s.CurrentPlayer.Play(items)
+			} else {
+				s.CurrentPlayer = nil
 			}
-			s.CurrentPlayer.Play(items)
 		} else {
-			s.CurrentPlayer.Resume()
+			return s.CurrentPlayer.Resume()
 		}
 	} else {
 		items := s.Queue.GetNextPlayableList()
-		player := s.GetPlayerForItem(items[0])
+		if len(items) > 0 {
+			player, err := s.GetPlayerForItem(items[0])
+			if err != nil {
+				return err
+			}
 
-		s.CurrentPlayer = player
+			s.CurrentPlayer = player
 
-		if err := player.Play(items); err != nil {
-			return err
+			if err := player.Play(items); err != nil {
+				return err
+			} else {
+				s.Queue.State.currentItem = &items[0]
+				s.Queue.State.cursor = 0
+			}
 		} else {
-			s.Queue.State.currentItem = &items[0]
-			s.Queue.State.cursor = 0
+			s.CurrentPlayer = nil
 		}
-
 	}
+
 	return nil
 }
 
-func (s *Session) GetPlayerForItem(item models.Item) (player Player) {
+func (s *Session) GetPlayerForItem(item models.Item) (Player, error) {
 	player_type := item.GetPlayerType()
 	if s.Players[player_type] != nil {
-		return s.Players[player_type]
+		return s.Players[player_type], nil
 	} else {
-		var player Player
+		var (
+			player Player
+			err    error
+		)
+
 		switch player_type {
 		case "spotify":
-			player = spotify.New(
-				&oauth2.Token{
-					AccessToken: s.Party.Host.GetIdentity("spotify").AccessToken,
-					TokenType:   "Bearer",
-				}, nil)
+			identity := s.Party.Host.GetRefreshableIdentity("spotify", s.Mongo)
+
+			player, err = spotify.New(identity, nil)
 			break
 		}
+
+		if err != nil {
+			return nil, err
+		}
+
 		s.Players[player_type] = player
-		return player
+
+		return player, nil
 	}
 
 }

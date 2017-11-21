@@ -91,6 +91,16 @@ func (c *PartyController) Create(context *gin.Context, cli *cli.Context) {
 		}
 		defer conn.Close()
 
+		if queue, err := party.ResumeQueue(conn, party_record.ID.Hex()); err == nil {
+			session := party.NewSession(&party_record, queue, c.Mongo, c.Redis)
+
+			c.party_sessions[party_record.ID.Hex()] = session
+			log.Println(c.party_sessions)
+		} else {
+			context.AbortWithError(500, err)
+			return
+		}
+
 		connect_token, err := party.InitiateConnect(conn, party_record, attendee)
 
 		var ws_protocol string
@@ -197,7 +207,9 @@ func (c *PartyController) Join(context *gin.Context, cli *cli.Context) {
 		if session, ok := c.party_sessions[party_record.ID.Hex()]; ok {
 			res["queue"] = session.Queue
 		} else if queue, err := party.ResumeQueue(conn, party_record.ID.Hex()); err == nil {
-			res["queue"] = queue
+			session := party.NewSession(party_record, queue, c.Mongo, c.Redis)
+
+			c.party_sessions[party_record.ID.Hex()] = session
 		}
 
 		context.JSON(200, res)
@@ -278,18 +290,8 @@ func (c *PartyController) HandleConnect(s *melody.Session) {
 
 		session.Sessions[s] = s
 	} else {
-		log.Println("Connected to party with 0 other active attendees")
-		session, db := c.Mongo.DB()
-		defer session.Close()
-
-		if party_record, err := models.PartyByID(db, bson.ObjectIdHex(party_id)); err == nil {
-			if queue, err := party.ResumeQueue(conn, party_id); err == nil {
-				session := party.NewSession(party_record, queue)
-				session.Sessions[s] = s
-
-				c.party_sessions[party_id] = session
-			}
-		}
+		log.Printf("No party session exists for (%s), something's fucky", party_id)
+		return
 	}
 
 	// Say hello to the user when they connect
@@ -310,20 +312,15 @@ func (c *PartyController) HandleDisconnect(s *melody.Session) {
 		attendee_count := len(session.Sessions)
 		log.Println("Left session with", attendee_count, "other active attendees")
 
-		if attendee_count == 0 {
-			session.Stop()
-			delete(c.party_sessions, party_id.(string))
-		} else {
-			// Notify others this attendee has disconnected
-			res, _ := json.Marshal(gin.H{
-				"type": "attendee.offline",
-				"user": s.MustGet("user_id"),
-			})
+		// Notify others this attendee has disconnected
+		res, _ := json.Marshal(gin.H{
+			"type": "attendee.offline",
+			"user": s.MustGet("user_id"),
+		})
 
-			for _, sess := range session.Sessions {
-				if writeErr := sess.Write(res); writeErr != nil {
-					log.Println(writeErr)
-				}
+		for _, sess := range session.Sessions {
+			if writeErr := sess.Write(res); writeErr != nil {
+				log.Println(writeErr)
 			}
 		}
 	} else {
@@ -360,21 +357,24 @@ func (c *PartyController) PushSocket(s *melody.Session, raw_item json.RawMessage
 	}
 	defer conn.Close()
 
-	if err := session.Queue.Push(conn, party_id.(string), item); err == nil {
-		event, err := json.Marshal(gin.H{
-			"item": item,
-			"type": "queue.push",
-		})
+	if err := session.Queue.Push(conn, party_id.(string), item); err != nil {
+		log.Println("Failed pushing item to queue", err)
+		return
+	}
 
-		if err != nil {
-			log.Println(err)
-			return
-		}
+	event, err := json.Marshal(gin.H{
+		"item": item,
+		"type": "queue.push",
+	})
 
-		for _, sess := range session.Sessions {
-			if writeErr := sess.Write(event); writeErr != nil {
-				log.Println(writeErr)
-			}
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	for _, sess := range session.Sessions {
+		if writeErr := sess.Write(event); writeErr != nil {
+			log.Println(writeErr)
 		}
 	}
 }
@@ -398,7 +398,7 @@ func (c *PartyController) Play(context *gin.Context) {
 
 	if session, ok := c.party_sessions[party_id.Hex()]; ok {
 		if err := session.Play(); err != nil {
-			log.Println(err)
+			context.AbortWithError(500, err)
 		} else {
 			context.JSON(200, gin.H{})
 		}
@@ -413,14 +413,14 @@ func (c *PartyController) Pause(context *gin.Context) {
 			"type": "error",
 			"error": gin.H{
 				"code": "invalid_party_id",
-				"msg": "Invalid party id",
+				"msg":  "Invalid party id",
 			},
 		})
 	}
 
 	if session, ok := c.party_sessions[party_id.Hex()]; ok {
 		if err := session.Pause(); err != nil {
-			log.Println(err)
+			context.AbortWithError(500, err)
 		} else {
 			context.JSON(200, gin.H{})
 		}
@@ -435,14 +435,14 @@ func (c *PartyController) Next(context *gin.Context) {
 			"type": "error",
 			"error": gin.H{
 				"code": "invalid_party_id",
-				"msg": "Invalid party id",
+				"msg":  "Invalid party id",
 			},
 		})
 	}
 
 	if session, ok := c.party_sessions[party_id.Hex()]; ok {
 		if err := session.Next(); err != nil {
-			log.Println(err)
+			context.AbortWithError(500, err)
 		} else {
 			context.JSON(200, gin.H{})
 		}

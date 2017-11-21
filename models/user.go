@@ -7,9 +7,9 @@ import (
 	"gopkg.in/dgrijalva/jwt-go.v3"
 	"strings"
 	"github.com/Pallinder/go-randomdata"
-	"github.com/terev/goth"
+	"github.com/markbates/goth"
 	"golang.org/x/oauth2"
-	"errors"
+	"dubclan/api/store"
 )
 
 type APIClaims struct {
@@ -144,52 +144,57 @@ func (u *User) AssumeIdentity(db *mgo.Database, identity Identity) error {
 	return u.Save(db)
 }
 
-func (u *User) GetIdentity(provider string) *Identity {
+func (u *User) GetRefreshableIdentity(provider string, store *store.MongoStore) *RefreshableIdentity {
 	for _, identity := range u.Identities {
 		if identity.Provider == provider {
-			return identity
+			return &RefreshableIdentity{
+				Identity: identity,
+				user:     u,
+				store:    store,
+			}
 		}
 	}
 
 	return nil
 }
 
-func (i *Identity) GetAccessToken(db *mgo.Database, user *User) (string, error) {
-	if i.AccessToken != "" {
-		if time.Now().After(i.ExpiresAt) {
-			if provider, err := goth.GetProvider(i.Provider); err == nil {
-				new_token, err := provider.RefreshToken(i.RefreshToken)
-				if err != nil {
-					return "", err
-				}
+type RefreshableIdentity struct {
+	*Identity
+	user  *User
+	store *store.MongoStore
+}
 
-				i.AccessToken = new_token.AccessToken
-				i.ExpiresAt = new_token.Expiry
-				if err := user.Save(db); err != nil {
-					return "", err
-				}
-			} else {
-				return "", err
-			}
-		} else {
-			return i.AccessToken, nil
-		}
-	} else if i.RefreshToken != "" {
-		if provider, err := goth.GetProvider(i.Provider); err == nil {
-			new_token, err := provider.RefreshToken(i.RefreshToken)
-			if err != nil {
-				return "", err
-			}
+func (i *RefreshableIdentity) refresh(provider goth.Provider) (*oauth2.Token, error) {
+	new_token, err := provider.RefreshToken(i.RefreshToken)
+	if err != nil {
+		return nil, err
+	}
 
-			i.AccessToken = new_token.AccessToken
-			i.ExpiresAt = new_token.Expiry
-			if err := user.Save(db); err != nil {
-				return "", err
-			}
-		} else {
-			return "", err
-		}
+	i.AccessToken = new_token.AccessToken
+	i.ExpiresAt = new_token.Expiry
+
+	return new_token, nil
+}
+
+func (i *RefreshableIdentity) GetToken(provider goth.Provider) (*oauth2.Token, error) {
+	current := &oauth2.Token{
+		AccessToken: i.AccessToken,
+		Expiry:      i.ExpiresAt,
+		TokenType:   "Bearer",
+	}
+
+	if current.Valid() {
+		return current, nil
 	} else {
-		return "", errors.New("no valid access token")
+		new_token, err := i.refresh(provider)
+
+		session, db := i.store.DB()
+		defer session.Close()
+
+		if err := i.user.Save(db); err != nil {
+			return nil, err
+		}
+
+		return new_token, err
 	}
 }

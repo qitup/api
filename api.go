@@ -6,7 +6,6 @@ import (
 	"dubclan/api/store"
 	"dubclan/api/controllers"
 	"net/http"
-	spotify_provider "github.com/markbates/goth/providers/spotify"
 	"github.com/markbates/goth"
 	"github.com/terev/goth/gothic"
 	"strings"
@@ -126,14 +125,7 @@ func api(cli *cli.Context) error {
 		callback_url = http_protocol + "://" + cli.String("host") + ":" + cli.String("port")
 	}
 
-	goth.UseProviders(
-		spotify_provider.New(
-			cli.String("spotify-id"),
-			cli.String("spotify-secret"),
-			callback_url+"/auth/spotify/callback",
-			spotify_player.HostScopes...,
-		),
-	)
+	goth.UseProviders(spotify_player.InitProvider(callback_url, cli))
 
 	gothic.GetProviderName = func(req *http.Request) (string, error) {
 		parts := strings.Split(req.URL.Path, "/")
