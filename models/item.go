@@ -11,8 +11,8 @@ import (
 type Item interface {
 	Added(by bson.ObjectId)
 	UpdateState(state ItemState)
-	GetType()(string)
-	GetPlayerType()(string)
+	GetType() (string)
+	GetPlayerType() (string)
 }
 
 type ItemState struct {
@@ -20,11 +20,10 @@ type ItemState struct {
 }
 
 type BaseItem struct {
-	Item
+	Item                  `json:"-"`
 	Type    string        `json:"type" bson:"type"`
 	AddedBy bson.ObjectId `json:"added_by" bson:"added_by,omitempty"`
 	AddedAt time.Time     `json:"added_at" bson:"added_at"`
-	State   ItemState     `json:"state" bson:"state"`
 }
 
 func (i *BaseItem) Added(by bson.ObjectId) {
@@ -34,10 +33,6 @@ func (i *BaseItem) Added(by bson.ObjectId) {
 
 func (i *BaseItem) GetType() string {
 	return i.Type
-}
-
-func (i *BaseItem) UpdateState(new ItemState) {
-	i.State = new
 }
 
 func UnmarshalItem(b []byte) (Item, error) {
@@ -81,10 +76,7 @@ func (i *SpotifyTrack) GetType() string {
 	return i.Type
 }
 
-func (i *SpotifyTrack) GetPlayerType() (string){
+func (i *SpotifyTrack) GetPlayerType() (string) {
 	return "spotify"
 }
 
-func (i *SpotifyTrack) UpdateState(new ItemState) {
-	i.State = new
-}

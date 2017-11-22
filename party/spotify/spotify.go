@@ -159,7 +159,7 @@ func (p *SpotifyPlayer) actionWithRefresh(action func() error) error {
 	err := action()
 
 	if err != nil {
-		if spotify_error, ok := err.(*spotify.Error); ok {
+		if spotify_error, ok := err.(spotify.Error); ok {
 			if spotify_error.Status == 401 && spotify_error.Message == "The access token expired" {
 				if err := p.refreshClient(); err != nil {
 					return err
