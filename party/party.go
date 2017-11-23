@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"log"
 	"encoding/json"
+	"gopkg.in/mgo.v2/bson"
 )
 
 const (
@@ -137,6 +138,7 @@ func (s *Session) Push(client *melody.Session, item models.Item) error {
 }
 
 func (s *Session) Stop() {
+
 	//s.Inactive <- true
 }
 
@@ -241,6 +243,10 @@ func (s *Session) GetPlayerForItem(item models.Item) (Player, error) {
 
 		return player, nil
 	}
+}
+
+func (s *Session) TransferHost(to bson.ObjectId) {
+
 }
 
 func InitiateConnect(redis redis.Conn, party models.Party, attendee models.Attendee) (string, error) {

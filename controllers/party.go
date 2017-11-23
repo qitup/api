@@ -255,15 +255,35 @@ func (c *PartyController) Leave(context *gin.Context) {
 	}
 
 	if user_id == party_record.HostID {
-		//if transfer_to, ok := context.GetQuery("transfer_to"); ok {
-		//
-		//} else if len(party_record.Attendees) == 0 {
-		//	if session, ok := c.party_sessions[]
-		//} else {
-		//	// Didn't specify someone to transfer
-		//}
-		context.JSON(400, bson.M{})
-		return
+		if _, ok := context.GetQuery("transfer_to"); ok {
+			//if session, ok := c.party_sessions[party_record.ID.Hex()]; ok {
+			//	session.
+			//}
+			context.JSON(400, gin.H{})
+			return
+		} else if len(party_record.Attendees) == 0 {
+			// Cleanup the party
+			if session, ok := c.party_sessions[party_record.ID.Hex()]; ok {
+				session.Stop()
+				delete(c.party_sessions, party_record.ID.Hex())
+			}
+
+			if err := party_record.Remove(db); err != nil {
+				log.Println(err)
+			}
+
+			context.JSON(200, bson.M{})
+			return
+		} else {
+			// Didn't specify someone to transfer
+			context.JSON(200, bson.M{
+				"error": gin.H{
+					"code": "transfer_unspecified",
+					"msg": "user to transfer to not specified",
+				},
+			})
+			return
+		}
 	} else {
 		err = party_record.RemoveAttendee(db, user_id)
 

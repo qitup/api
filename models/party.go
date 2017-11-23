@@ -211,3 +211,7 @@ func (p *Party) WithHost(db *mgo.Database) (error) {
 		return errors.New("invalid party host")
 	}
 }
+
+func (p *Party) Remove(db *mgo.Database) error {
+	return db.C(PARTY_COLLECTION).RemoveId(p.ID)
+}
