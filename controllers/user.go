@@ -46,6 +46,7 @@ func (c *UserController) CompleteUserAuth(context *gin.Context, assume_identity 
 			new_user := &models.User{
 				ID:         bson.NewObjectId(),
 				Identities: []*models.Identity{&assume_identity},
+				CanHost:    assume_identity.Provider == "spotify",
 			}
 
 			if err := new_user.AssumeIdentity(db, assume_identity); err == nil {

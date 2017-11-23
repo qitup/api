@@ -12,7 +12,7 @@ const PARTY_COLLECTION = "parties"
 type Party struct {
 	ID        bson.ObjectId `json:"id" bson:"_id"`
 	HostID    bson.ObjectId `json:"-" bson:"host_id"`
-	Host      *User          `json:"host" bson:"host,omitempty"`
+	Host      *User         `json:"host" bson:"host,omitempty"`
 	Attendees []*Attendee   `json:"attendees" bson:"attendees"`
 	JoinCode  string        `json:"join_code" bson:"join_code"`
 	Name      string        `json:"name" bson:"name"`
@@ -175,6 +175,25 @@ func (p *Party) AddAttendee(db *mgo.Database, attendee *Attendee) (error) {
 
 	if err == nil {
 		p.Attendees = append(p.Attendees, attendee)
+	}
+
+	return err
+}
+
+func (p *Party) RemoveAttendee(db *mgo.Database, user_id bson.ObjectId) (error) {
+	err := db.C(PARTY_COLLECTION).Update(bson.M{
+		"_id": p.ID,
+	}, bson.M{
+		"$pull": bson.M{"attendees": bson.M{"user_id": user_id}},
+	})
+
+	if err == nil {
+		for i, attendee := range p.Attendees {
+			if attendee.UserId == user_id {
+				p.Attendees = append(p.Attendees[:i], p.Attendees[i+1:]...)
+				break
+			}
+		}
 	}
 
 	return err

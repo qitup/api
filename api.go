@@ -17,7 +17,6 @@ import (
 	"github.com/olahol/melody"
 	"encoding/json"
 	"log"
-	"dubclan/api/party"
 	"encoding/base64"
 	"github.com/unrolled/secure"
 	spotify_player "dubclan/api/party/spotify"
@@ -221,6 +220,8 @@ func api(cli *cli.Context) error {
 		party_controller.Join(context, cli)
 	})
 
+	party_group.GET("/leave", party_controller.Leave)
+
 	party_group.GET("/connect/:code", func(context *gin.Context) {
 		party_controller.Connect(context, m)
 	})
@@ -295,16 +296,6 @@ func api(cli *cli.Context) error {
 				break
 			case "queue.push":
 				party_controller.PushSocket(s, *msg["item"])
-				break
-			case "player.event":
-				var event party.Event
-				err := json.Unmarshal(*msg["event"], &event)
-
-				if err == nil {
-					log.Println(event)
-				} else {
-					log.Println(err)
-				}
 				break
 			}
 		} else {

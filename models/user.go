@@ -28,6 +28,7 @@ type User struct {
 	Username   string        `json:"username" bson:"username"`
 	Name       string        `json:"name" bson:"name"`
 	AvatarURL  string        `json:"avatar_url" bson:"avatar_url"`
+	CanHost    bool          `json:"can_host" bson:"can_host"`
 }
 
 type Users []User
@@ -65,12 +66,18 @@ func UserByID(db *mgo.Database, id bson.ObjectId) (*User, error) {
 func UpdateUserByIdentity(db *mgo.Database, identity Identity) (*User, error) {
 	var user User
 
-	change := mgo.Change{
-		Update: bson.M{
-			"$set": bson.M{
-				"identities.$": identity,
-			},
+	var update = bson.M{
+		"$set": bson.M{
+			"identities.$": identity,
 		},
+	}
+
+	if identity.Provider == "spotify" {
+		update["$set"].(bson.M)["can_host"] = true
+	}
+
+	change := mgo.Change{
+		Update:    update,
 		ReturnNew: true,
 	}
 
@@ -88,12 +95,22 @@ func UpdateUserByIdentity(db *mgo.Database, identity Identity) (*User, error) {
 
 func UpdateIdentityById(db *mgo.Database, id bson.ObjectId, identity Identity) (error) {
 	bulk := db.C(USER_COLLECTION).Bulk()
-	bulk.Update(
+
+	pairs := []interface{}{
 		bson.M{"_id": id},
 		bson.M{"$pull": bson.M{"identities.email": identity.Email, "identities.provider": identity.Provider}},
 		bson.M{"_id": id},
 		bson.M{"$addToSet": bson.M{"identities": identity}},
-	)
+	}
+
+	if identity.Provider == "spotify" {
+		pairs = append(pairs,
+			bson.M{"_id": id},
+			bson.M{"$set": bson.M{"can_host": true}},
+		)
+	}
+
+	bulk.Update(pairs)
 
 	_, err := bulk.Run()
 

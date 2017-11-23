@@ -231,6 +231,59 @@ func (c *PartyController) Join(context *gin.Context, cli *cli.Context) {
 	}
 }
 
+func (c *PartyController) Leave(context *gin.Context) {
+	party_id := bson.ObjectIdHex(context.Query("id"))
+
+	session, db := c.Mongo.DB()
+	defer session.Close()
+
+	user_id := bson.ObjectIdHex(context.MustGet("userID").(string))
+
+	party_record, err := models.PartyByID(db, party_id)
+
+	if err == mgo.ErrNotFound {
+		context.JSON(400, gin.H{
+			"error": gin.H{
+				"code": "party_not_found",
+				"msg":  "party not found",
+			},
+		})
+		return
+	} else if err != nil {
+		context.AbortWithError(500, err)
+		return
+	}
+
+	if user_id == party_record.HostID {
+		//if transfer_to, ok := context.GetQuery("transfer_to"); ok {
+		//
+		//} else if len(party_record.Attendees) == 0 {
+		//	if session, ok := c.party_sessions[]
+		//} else {
+		//	// Didn't specify someone to transfer
+		//}
+		context.JSON(400, bson.M{})
+		return
+	} else {
+		err = party_record.RemoveAttendee(db, user_id)
+
+		if err == mgo.ErrNotFound {
+			context.JSON(400, gin.H{
+				"error": gin.H{
+					"code": "attendee_not_exist",
+					"msg":  "not in attendee list",
+				},
+			})
+			return
+		} else if err != nil {
+			context.AbortWithError(500, err)
+			return
+		}
+	}
+
+	context.JSON(200, gin.H{})
+}
+
 func (c *PartyController) Connect(context *gin.Context, m *melody.Melody) {
 	connect_token, err := url.PathUnescape(context.Param("code"))
 	if err != nil {
