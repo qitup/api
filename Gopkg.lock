@@ -8,12 +8,6 @@
   revision = "8c3362a5e6781e0d1046f1267b3c1f19b2cde334"
 
 [[projects]]
-  branch = "master"
-  name = "github.com/VividCortex/multitick"
-  packages = ["."]
-  revision = "093e689081f93f076729cda83517a5379dd9895d"
-
-[[projects]]
   name = "github.com/appleboy/gin-jwt"
   packages = ["."]
   revision = "f7347d7c16fc8297bf5b7215b9e4847a5ca05d90"
@@ -123,6 +117,12 @@
 
 [[projects]]
   branch = "master"
+  name = "github.com/olebedev/emitter"
+  packages = ["."]
+  revision = "a2d0ac57818e424e0bd310667ffcca8b47d69cfb"
+
+[[projects]]
+  branch = "master"
   name = "github.com/terev/goth"
   packages = ["gothic"]
   revision = "69abff2836b731854f6e0bd9e1aedf4924f1800a"
@@ -160,7 +160,7 @@
 [[projects]]
   branch = "master"
   name = "golang.org/x/oauth2"
-  packages = [".","internal"]
+  packages = [".","clientcredentials","internal"]
   revision = "bb50c06baba3d0c76f9d125c0719093e315b5b44"
 
 [[projects]]
@@ -202,6 +202,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "8a6371bf262cecfc79b4638252268f94882717183ceb33fd84359359e5d0d11a"
+  inputs-digest = "55f5e182ee65a6336949ad02821de7cab308061da9a7dde437a748f096382f8d"
   solver-name = "gps-cdcl"
   solver-version = 1

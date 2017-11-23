@@ -201,7 +201,7 @@ func (c *PartyController) Join(context *gin.Context, cli *cli.Context) {
 
 		// Add the queue's contents to the response if available
 		if session, ok := c.party_sessions[party_record.ID.Hex()]; ok {
-			res["queue"] = session.Queue
+			res["queue"] = session.GetQueue()
 		} else if queue, err := party.ResumeQueue(conn, party_record.ID.Hex()); err == nil {
 			session := party.NewSession(party_record, queue, c.Mongo, c.Redis)
 
@@ -266,34 +266,11 @@ func (c *PartyController) Connect(context *gin.Context, m *melody.Melody) {
 }
 
 func (c *PartyController) HandleConnect(s *melody.Session) {
-	conn, err := c.Redis.GetConnection()
-	if err != nil {
-		log.Println("Failed obtaining redis connection", err)
-		return
-	}
-	defer conn.Close()
-
 	party_id := s.MustGet("party_id").(string)
-
-	user_id := s.MustGet("user_id").(string)
 
 	// Notify others this attendee has become active
 	if session, ok := c.party_sessions[party_id]; ok {
-		attendee_count := len(session.Sessions)
-		log.Println("Connected to party with", attendee_count, "other active attendees")
-
-		res, _ := json.Marshal(gin.H{
-			"type": "attendee.active",
-			"user": user_id,
-		})
-
-		for _, sess := range session.Sessions {
-			if writeErr := sess.Write(res); writeErr != nil {
-				log.Println(writeErr)
-			}
-		}
-
-		session.Sessions[s] = s
+		session.ClientConnected(s)
 	} else {
 		log.Printf("No party session exists for (%s), something's fucky", party_id)
 		return
@@ -312,22 +289,7 @@ func (c *PartyController) HandleDisconnect(s *melody.Session) {
 
 	if session, ok := c.party_sessions[party_id.(string)]; ok {
 		// Cleanup session from the party map
-		delete(session.Sessions, s)
-
-		attendee_count := len(session.Sessions)
-		log.Println("Left session with", attendee_count, "other active attendees")
-
-		// Notify others this attendee has disconnected
-		res, _ := json.Marshal(gin.H{
-			"type": "attendee.offline",
-			"user": s.MustGet("user_id"),
-		})
-
-		for _, sess := range session.Sessions {
-			if writeErr := sess.Write(res); writeErr != nil {
-				log.Println(writeErr)
-			}
-		}
+		session.ClientDisconnected(s)
 	} else {
 		log.Printf("No party session exists for (%s), something's fucky", party_id)
 	}
@@ -352,35 +314,16 @@ func (c *PartyController) PushSocket(s *melody.Session, raw_item json.RawMessage
 	user_id := s.MustGet("user_id").(string)
 	item.Added(bson.ObjectIdHex(user_id))
 
-	party_id := s.MustGet("party_id")
-	session := c.party_sessions[party_id.(string)]
+	party_id, _ := s.Get("party_id")
 
-	conn, err := c.Redis.GetConnection()
-	if err != nil {
-		log.Println("Failed obtaining redis connection", err)
-		return
-	}
-	defer conn.Close()
-
-	if err := session.Queue.Push(conn, party_id.(string), item); err != nil {
-		log.Println("Failed pushing item to queue", err)
-		return
-	}
-
-	event, err := json.Marshal(gin.H{
-		"item": item,
-		"type": "queue.push",
-	})
-
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	for _, sess := range session.Sessions {
-		if writeErr := sess.Write(event); writeErr != nil {
-			log.Println(writeErr)
+	if session, ok := c.party_sessions[party_id.(string)]; ok {
+		// Cleanup session from the party map
+		if err := session.Push(s, item); err != nil {
+			log.Println("Failed pushing item to queue", err)
+			return
 		}
+	} else {
+		log.Printf("No party session exists for (%s), something's fucky", party_id)
 	}
 }
 

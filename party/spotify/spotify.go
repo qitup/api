@@ -9,6 +9,7 @@ import (
 	"github.com/urfave/cli"
 	spotify_provider "github.com/markbates/goth/providers/spotify"
 	"github.com/markbates/goth"
+	"github.com/olebedev/emitter"
 )
 
 var (
@@ -34,6 +35,7 @@ func InitProvider(callback_url string, cli *cli.Context) goth.Provider {
 }
 
 type SpotifyPlayer struct {
+	emitter        *emitter.Emitter
 	identity       *models.RefreshableIdentity
 	client         spotify.Client
 	refreshing     sync.RWMutex // Locked whilst refreshing host's access token
@@ -47,7 +49,7 @@ type SpotifyPlayer struct {
 	ticker *time.Ticker
 }
 
-func New(identity *models.RefreshableIdentity, device_id *string) (*SpotifyPlayer, error) {
+func New(emitter *emitter.Emitter, identity *models.RefreshableIdentity, device_id *string) (*SpotifyPlayer, error) {
 	token, _, err := identity.GetToken(provider)
 
 	if err != nil {
@@ -55,6 +57,7 @@ func New(identity *models.RefreshableIdentity, device_id *string) (*SpotifyPlaye
 	}
 
 	return &SpotifyPlayer{
+		emitter:        emitter,
 		identity:       identity,
 		client:         authenticator.NewClient(token),
 		playback_state: nil,
@@ -221,6 +224,9 @@ func (p *SpotifyPlayer) poll() {
 			}
 
 			// TODO: Update player's state
+			if state != nil {
+				p.UpdateState(state)
+			}
 
 			break
 
@@ -233,6 +239,24 @@ func (p *SpotifyPlayer) poll() {
 	}
 }
 
-func (p *SpotifyPlayer) UpdateState() (error) {
-	panic("implement me")
+func (p *SpotifyPlayer) UpdateState(new_state *spotify.PlayerState) (error) {
+	if p.playback_state == nil {
+		if new_state.Playing {
+			// Playback started
+			p.playback_state = new_state
+		}
+	} else if p.playback_state.Item.ID != new_state.Item.ID {
+		if !p.HasItems() || p.cursor == len(p.current_tracks) {
+			// playback has been started somewhere else
+		} else if p.current_tracks[p.cursor+1] == new_state.Item.URI {
+			// Track changed to next item
+		} else {
+			// playback has been started somewhere else
+		}
+	} else {
+		// Update currently playing track
+
+	}
+
+	return nil
 }

@@ -1,6 +1,9 @@
+//go:generate stringer -type=EventType player.go
 package party
 
-import "dubclan/api/models"
+import (
+	"dubclan/api/models"
+)
 
 type Player interface {
 	Play(item []models.Item) (error)
@@ -9,11 +12,33 @@ type Player interface {
 	Next() (error)
 	Previous() (error)
 	HasItems() (bool)
-	UpdateState() (error)
 }
 
+type EventType int
+
+const (
+	PLAYBACK_START       EventType = iota
+	PLAYBACK_INTERRUPTED
+	QUEUE_CHANGED
+)
+
 type Event struct {
-	Type     string                 `json:"type"`
-	Name     string                 `json:"name"`
-	Metadata map[string]interface{} `json:"metadata"`
+	Type     EventType              `json:"type"`
+}
+
+type PlaybackStart struct {
+	Event
+}
+
+type PlaybackPause struct {
+	Event
+}
+
+type PlaybackInterrupted struct {
+	Event
+}
+
+type QueueChanged struct {
+	Event
+	Queue Queue	`json:"queue"`
 }

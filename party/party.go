@@ -9,6 +9,10 @@ import (
 	"encoding/base64"
 	"dubclan/api/party/spotify"
 	"dubclan/api/store"
+	"github.com/olebedev/emitter"
+	"github.com/gin-gonic/gin"
+	"log"
+	"encoding/json"
 )
 
 const (
@@ -19,31 +23,117 @@ const (
 var ConnectTokenIssued = errors.New("connect token is issued for this user")
 
 type Session struct {
-	Mongo         *store.MongoStore
-	Redis         *store.RedisStore
-	Party         *models.Party
-	Sessions      map[*melody.Session]*melody.Session
-	Queue         *Queue
-	Players       map[string]Player
+	mongo         *store.MongoStore
+	redis         *store.RedisStore
+	party         *models.Party
+	clients       map[*melody.Session]*melody.Session
+	queue         *Queue
+	players       map[string]Player
 	CurrentPlayer Player
+	emitter       *emitter.Emitter
 }
 
 func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redis *store.RedisStore) (*Session) {
 	session := &Session{
-		Mongo:    mongo,
-		Redis:    redis,
-		Party:    party,
-		Sessions: make(map[*melody.Session]*melody.Session),
-		Queue:    queue,
-		Players:  make(map[string]Player),
+		mongo:   mongo,
+		redis:   redis,
+		party:   party,
+		clients: make(map[*melody.Session]*melody.Session),
+		queue:   queue,
+		players: make(map[string]Player),
+		emitter: emitter.New(10),
 	}
+
+	go (func() {
+		change := session.emitter.On("player.change")
+		start := session.emitter.On("player.start")
+		interrupt := session.emitter.On("player.interrupt")
+		pause := session.emitter.On("player.pause")
+		for {
+			select {
+				case <-change:
+					break
+				case <-start:
+					break
+				case <-interrupt:
+					break
+				case <-pause:
+					break
+			}
+		}
+	})()
 
 	return session
 }
 
-func (s *Session) InitializePlayer(service string, player Player) {
+func (s *Session) GetQueue() *Queue {
+	return s.queue
+}
 
-	s.Players[service] = player
+func (s *Session) ClientConnected(client *melody.Session) {
+	attendee_count := len(s.clients)
+	log.Println("Connected to party with", attendee_count, "other active attendees")
+
+	res, _ := json.Marshal(gin.H{
+		"type": "attendee.active",
+		"user": client.MustGet("user_id"),
+	})
+
+	for _, sess := range s.clients {
+		if writeErr := sess.Write(res); writeErr != nil {
+			log.Println(writeErr)
+		}
+	}
+
+	s.clients[client] = client
+}
+
+func (s *Session) ClientDisconnected(client *melody.Session) {
+	delete(s.clients, client)
+
+	attendee_count := len(s.clients)
+	log.Println("Left session with", attendee_count, "other active attendees")
+
+	// Notify others this attendee has disconnected
+	res, _ := json.Marshal(gin.H{
+		"type": "attendee.offline",
+		"user": client.MustGet("user_id"),
+	})
+
+	for _, sess := range s.clients {
+		if writeErr := sess.Write(res); writeErr != nil {
+			log.Println(writeErr)
+		}
+	}
+}
+
+func (s *Session) Push(client *melody.Session, item models.Item) error {
+	conn, err := s.redis.GetConnection()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	if err := s.queue.Push(conn, s.party.ID.Hex(), item); err != nil {
+		return err
+	}
+
+	event, err := json.Marshal(gin.H{
+		"queue": s.queue,
+		"type":  "queue.change",
+	})
+
+	if err != nil {
+		return err
+	}
+
+	for _, sess := range s.clients {
+		if writeErr := sess.Write(event); writeErr != nil {
+			log.Println(writeErr)
+		}
+	}
+
+	return nil
 }
 
 func (s *Session) Stop() {
@@ -61,7 +151,7 @@ func (s *Session) Pause() (error) {
 func (s *Session) Next() (error) {
 	if s.CurrentPlayer != nil {
 		if !s.CurrentPlayer.HasItems() {
-			items := s.Queue.GetNextPlayableList()
+			items := s.queue.GetNextPlayableList()
 			if len(items) > 0 {
 				player, err := s.GetPlayerForItem(items[0])
 				if err != nil {
@@ -85,7 +175,7 @@ func (s *Session) Next() (error) {
 func (s *Session) Play() (error) {
 	if s.CurrentPlayer != nil {
 		if !s.CurrentPlayer.HasItems() {
-			items := s.Queue.GetNextPlayableList()
+			items := s.queue.GetNextPlayableList()
 			if len(items) > 0 {
 				player, err := s.GetPlayerForItem(items[0])
 				if err != nil {
@@ -102,7 +192,7 @@ func (s *Session) Play() (error) {
 			return s.CurrentPlayer.Resume()
 		}
 	} else {
-		items := s.Queue.GetNextPlayableList()
+		items := s.queue.GetNextPlayableList()
 		if len(items) > 0 {
 			player, err := s.GetPlayerForItem(items[0])
 			if err != nil {
@@ -114,8 +204,8 @@ func (s *Session) Play() (error) {
 			if err := player.Play(items); err != nil {
 				return err
 			} else {
-				s.Queue.State.currentItem = &items[0]
-				s.Queue.State.cursor = 0
+				s.queue.State.currentItem = &items[0]
+				s.queue.State.cursor = 0
 			}
 		} else {
 			s.CurrentPlayer = nil
@@ -127,8 +217,8 @@ func (s *Session) Play() (error) {
 
 func (s *Session) GetPlayerForItem(item models.Item) (Player, error) {
 	player_type := item.GetPlayerType()
-	if s.Players[player_type] != nil {
-		return s.Players[player_type], nil
+	if s.players[player_type] != nil {
+		return s.players[player_type], nil
 	} else {
 		var (
 			player Player
@@ -137,9 +227,9 @@ func (s *Session) GetPlayerForItem(item models.Item) (Player, error) {
 
 		switch player_type {
 		case "spotify":
-			identity := s.Party.Host.GetRefreshableIdentity("spotify", s.Mongo)
+			identity := s.party.Host.GetRefreshableIdentity("spotify", s.mongo)
 
-			player, err = spotify.New(identity, nil)
+			player, err = spotify.New(s.emitter, identity, nil)
 			break
 		}
 
@@ -147,11 +237,10 @@ func (s *Session) GetPlayerForItem(item models.Item) (Player, error) {
 			return nil, err
 		}
 
-		s.Players[player_type] = player
+		s.players[player_type] = player
 
 		return player, nil
 	}
-
 }
 
 func InitiateConnect(redis redis.Conn, party models.Party, attendee models.Attendee) (string, error) {
