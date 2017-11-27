@@ -17,6 +17,11 @@ type Party struct {
 	JoinCode  string        `json:"join_code" bson:"join_code"`
 	Name      string        `json:"name" bson:"name"`
 	CreatedAt time.Time     `json:"created_at" bson:"created_at"`
+	Settings  Settings      `json:"settings" bson:"settings"`
+}
+
+type Settings struct {
+	Timeout time.Duration `json:"timeout" bson:"timeout"`
 }
 
 type Attendee struct {

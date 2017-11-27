@@ -74,20 +74,15 @@ func (q *Queue) Push(conn redis.Conn, id string, item models.Item) error {
 	}
 }
 
-//func (q *Queue) HasItem(cmp Item) (bool, error) {
-//	for _, item := range q.Items {
-//		if cmp.
-//	}
-//}
-
-//func (q *Queue) Pop(redis redis.Conn, party string, item *BaseItem) error {
-//	if item, err := redis.Do("RPOP", party); err == nil {
-//		if serialized, err := item.Deserialize(); err == nil {
-//
-//		} else {
-//			return nil
-//		}
-//	} else {
-//		return err
-//	}
-//}
+func (q *Queue) Pop(conn redis.Conn, id string) (models.Item, error) {
+	if raw, err := redis.String(conn.Do("RPOP", QUEUE_PREFIX+id)); err == nil {
+		u := &models.ItemUnpacker{}
+		if err := json.Unmarshal([]byte(raw), u); err == nil {
+			return u.Result, nil
+		} else {
+			return nil, err
+		}
+	} else {
+		return nil, err
+	}
+}

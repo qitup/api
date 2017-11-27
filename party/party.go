@@ -14,12 +14,15 @@ import (
 	"log"
 	"encoding/json"
 	"gopkg.in/mgo.v2/bson"
+	"time"
 )
 
 const (
 	QUEUE_PREFIX     = "queue:"
 	JOIN_CODE_PREFIX = "join_code:"
 )
+
+var EmptyQueue = errors.New("empty queue")
 
 var ConnectTokenIssued = errors.New("connect token is issued for this user")
 
@@ -32,12 +35,13 @@ type Session struct {
 	players       map[string]Player
 	CurrentPlayer Player
 	emitter       *emitter.Emitter
+	timeout       <-chan time.Time
 }
 
-func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redis *store.RedisStore) (*Session) {
+func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redis_store *store.RedisStore) (*Session) {
 	session := &Session{
 		mongo:   mongo,
-		redis:   redis,
+		redis:   redis_store,
 		party:   party,
 		clients: make(map[*melody.Session]*melody.Session),
 		queue:   queue,
@@ -48,23 +52,84 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 	go (func() {
 		change := session.emitter.On("player.change")
 		start := session.emitter.On("player.start")
-		interrupt := session.emitter.On("player.interrupt")
+		interrupt := session.emitter.On("player.interrupted")
 		pause := session.emitter.On("player.pause")
 		for {
 			select {
-				case <-change:
-					break
-				case <-start:
-					break
-				case <-interrupt:
-					break
-				case <-pause:
-					break
+			case <-change:
+				log.Println("CHANGE")
+				conn, err := redis_store.GetConnection()
+
+				if err != nil {
+					panic(err)
+				}
+
+				_, err = session.queue.Pop(conn, session.party.ID.Hex())
+
+				if session.CurrentPlayer != nil && !session.CurrentPlayer.HasItems() {
+					session.Play()
+				}
+
+				event, _ := json.Marshal(map[string]interface{}{
+					"type": "player.change",
+				})
+
+				for _, sess := range session.clients {
+					if writeErr := sess.Write(event); writeErr != nil {
+						log.Println(writeErr)
+					}
+				}
+				break
+			case <-start:
+				log.Println("START")
+				event, _ := json.Marshal(map[string]interface{}{
+					"type": "player.play",
+				})
+
+				for _, sess := range session.clients {
+					if writeErr := sess.Write(event); writeErr != nil {
+						log.Println(writeErr)
+					}
+				}
+
+				break
+			case <-interrupt:
+				log.Println("INTERRUPT")
+				event, _ := json.Marshal(map[string]interface{}{
+					"type": "player.interrupted",
+				})
+
+				for _, sess := range session.clients {
+					if writeErr := sess.Write(event); writeErr != nil {
+						log.Println(writeErr)
+					}
+				}
+
+				break
+			case <-pause:
+				log.Println("PAUSE")
+				event, _ := json.Marshal(map[string]interface{}{
+					"type": "player.pause",
+				})
+
+				for _, sess := range session.clients {
+					if writeErr := sess.Write(event); writeErr != nil {
+						log.Println(writeErr)
+					}
+				}
+
+				break
 			}
 		}
 	})()
 
 	return session
+}
+
+func (s *Session) setupTimeout() {
+	if s.timeout == nil {
+		s.timeout = time.After(s.party.Settings.Timeout)
+	}
 }
 
 func (s *Session) GetQueue() *Queue {
@@ -189,6 +254,7 @@ func (s *Session) Play() (error) {
 				return s.CurrentPlayer.Play(items)
 			} else {
 				s.CurrentPlayer = nil
+				return EmptyQueue
 			}
 		} else {
 			return s.CurrentPlayer.Resume()
@@ -210,7 +276,7 @@ func (s *Session) Play() (error) {
 				s.queue.State.cursor = 0
 			}
 		} else {
-			s.CurrentPlayer = nil
+			return EmptyQueue
 		}
 	}
 
@@ -229,9 +295,13 @@ func (s *Session) GetPlayerForItem(item models.Item) (Player, error) {
 
 		switch player_type {
 		case "spotify":
-			identity := s.party.Host.GetRefreshableIdentity("spotify", s.mongo)
+			token := s.party.Host.GetIdentityToken("spotify")
 
-			player, err = spotify.New(s.emitter, identity, nil)
+			if token == nil {
+				log.Println("NIL TOKEN")
+			}
+
+			player, err = spotify.New(s.emitter, token, nil)
 			break
 		}
 

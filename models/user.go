@@ -7,9 +7,7 @@ import (
 	"gopkg.in/dgrijalva/jwt-go.v3"
 	"strings"
 	"github.com/Pallinder/go-randomdata"
-	"github.com/markbates/goth"
 	"golang.org/x/oauth2"
-	"dubclan/api/store"
 )
 
 type APIClaims struct {
@@ -161,57 +159,17 @@ func (u *User) AssumeIdentity(db *mgo.Database, identity Identity) error {
 	return u.Save(db)
 }
 
-func (u *User) GetRefreshableIdentity(provider string, store *store.MongoStore) *RefreshableIdentity {
+func (u *User) GetIdentityToken(provider string) *oauth2.Token {
 	for _, identity := range u.Identities {
 		if identity.Provider == provider {
-			return &RefreshableIdentity{
-				Identity: identity,
-				user:     u,
-				store:    store,
+			return &oauth2.Token{
+				AccessToken:  identity.AccessToken,
+				Expiry:       identity.ExpiresAt,
+				TokenType:    "Bearer",
+				RefreshToken: identity.RefreshToken,
 			}
 		}
 	}
 
 	return nil
-}
-
-type RefreshableIdentity struct {
-	*Identity
-	user  *User
-	store *store.MongoStore
-}
-
-func (i *RefreshableIdentity) refresh(provider goth.Provider) (*oauth2.Token, error) {
-	new_token, err := provider.RefreshToken(i.RefreshToken)
-	if err != nil {
-		return nil, err
-	}
-
-	i.AccessToken = new_token.AccessToken
-	i.ExpiresAt = new_token.Expiry
-
-	return new_token, nil
-}
-
-func (i *RefreshableIdentity) GetToken(provider goth.Provider) (*oauth2.Token, bool, error) {
-	current := &oauth2.Token{
-		AccessToken: i.AccessToken,
-		Expiry:      i.ExpiresAt,
-		TokenType:   "Bearer",
-	}
-
-	if current.Valid() {
-		return current, false, nil
-	} else {
-		new_token, err := i.refresh(provider)
-
-		session, db := i.store.DB()
-		defer session.Close()
-
-		if err := i.user.Save(db); err != nil {
-			return nil, false, err
-		}
-
-		return new_token, true, err
-	}
 }

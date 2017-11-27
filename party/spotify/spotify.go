@@ -10,11 +10,12 @@ import (
 	spotify_provider "github.com/markbates/goth/providers/spotify"
 	"github.com/markbates/goth"
 	"github.com/olebedev/emitter"
+	"golang.org/x/oauth2"
 )
 
 var (
 	hostScopes    = []string{"user-library-read", "user-read-private", "user-read-playback-state", "user-modify-playback-state", "user-read-currently-playing"}
-	authenticator = spotify.Authenticator{}
+	authenticator = spotify.NewAuthenticator("", hostScopes...)
 
 	provider goth.Provider
 )
@@ -36,7 +37,6 @@ func InitProvider(callback_url string, cli *cli.Context) goth.Provider {
 
 type SpotifyPlayer struct {
 	emitter        *emitter.Emitter
-	identity       *models.RefreshableIdentity
 	client         spotify.Client
 	refreshing     sync.RWMutex // Locked whilst refreshing host's access token
 	playback_state *spotify.PlayerState
@@ -49,16 +49,10 @@ type SpotifyPlayer struct {
 	ticker *time.Ticker
 }
 
-func New(emitter *emitter.Emitter, identity *models.RefreshableIdentity, device_id *string) (*SpotifyPlayer, error) {
-	token, _, err := identity.GetToken(provider)
-
-	if err != nil {
-		return nil, err
-	}
+func New(emitter *emitter.Emitter, token *oauth2.Token, device_id *string) (*SpotifyPlayer, error) {
 
 	return &SpotifyPlayer{
 		emitter:        emitter,
-		identity:       identity,
 		client:         authenticator.NewClient(token),
 		playback_state: nil,
 		device_id:      device_id,
@@ -80,13 +74,14 @@ func (p *SpotifyPlayer) Play(items []models.Item) (error) {
 
 	log.Println(uris)
 
-	opt := spotify.PlayOptions{nil, nil, uris, nil}
+	opt := spotify.PlayOptions{
+		URIs: uris,
+		PlaybackOffset: &spotify.PlaybackOffset{
+			URI: uris[0],
+		},
+	}
 
-	err := p.actionWithRefresh(func() error {
-		return p.client.PlayOpt(&opt)
-	})
-
-	if err != nil {
+	if err := p.client.PlayOpt(&opt); err != nil {
 		return err
 	}
 	p.current_tracks = uris
@@ -96,12 +91,8 @@ func (p *SpotifyPlayer) Play(items []models.Item) (error) {
 }
 
 func (p *SpotifyPlayer) Resume() (error) {
-	err := p.actionWithRefresh(func() error {
-		return p.client.Play()
-	})
-
 	// SPOTIFY RETURNS A SERVER ERROR IF THERE IS A TRACK CURRENTLY PLAYING
-	if err != nil {
+	if err := p.client.Play(); err != nil {
 		return err
 	}
 
@@ -110,23 +101,16 @@ func (p *SpotifyPlayer) Resume() (error) {
 }
 
 func (p *SpotifyPlayer) Pause() (error) {
-	err := p.actionWithRefresh(func() error {
-		return p.client.Pause()
-	})
-
-	if err != nil {
+	if err := p.client.Pause(); err != nil {
 		return err
 	}
+
 	p.stopPolling()
 	return nil
 }
 
 func (p *SpotifyPlayer) Next() (error) {
-	err := p.actionWithRefresh(func() error {
-		return p.client.Next()
-	})
-
-	if err != nil {
+	if err := p.client.Next(); err != nil {
 		return err
 	}
 
@@ -158,65 +142,13 @@ func (p *SpotifyPlayer) startPolling(interval time.Duration) {
 	}
 }
 
-func (p *SpotifyPlayer) actionWithRefresh(action func() error) error {
-	err := action()
-
-	if err != nil {
-		if spotify_error, ok := err.(spotify.Error); ok {
-			if spotify_error.Status == 401 && spotify_error.Message == "The access token expired" {
-				if err := p.refreshClient(); err != nil {
-					return err
-				}
-			} else {
-				return err
-			}
-		} else {
-			return err
-		}
-
-		return action()
-	}
-
-	return nil
-}
-
-func (p *SpotifyPlayer) refreshClient() (error) {
-	// Hold lock to prevent other sessions from being 401'ed
-	log.Println("LOCKING")
-	p.refreshing.Lock()
-	new_token, changed, err := p.identity.GetToken(provider)
-	if err != nil {
-		p.refreshing.Unlock()
-		return err
-	}
-
-	// Only update the client object after token refresh
-	if changed {
-		p.client = authenticator.NewClient(new_token)
-	}
-
-	p.refreshing.Unlock()
-	return nil
-}
-
 // Update the state of the players until a session becomes inactive
 func (p *SpotifyPlayer) poll() {
 	for {
 		select {
 		// Update states of our players
 		case <-p.ticker.C:
-			var state *spotify.PlayerState
-
-			err := p.actionWithRefresh(func() error {
-				inner_state, err := p.client.PlayerState()
-
-				if err != nil {
-					return err
-				}
-
-				state = inner_state
-				return nil
-			})
+			state, err := p.client.PlayerState()
 
 			if err != nil {
 				log.Println("Failed getting spotify player state ", err)
@@ -240,22 +172,44 @@ func (p *SpotifyPlayer) poll() {
 }
 
 func (p *SpotifyPlayer) UpdateState(new_state *spotify.PlayerState) (error) {
+	log.Println("PREV:", p.playback_state)
+	log.Println("NEW:", new_state)
+
 	if p.playback_state == nil {
 		if new_state.Playing {
 			// Playback started
-			p.playback_state = new_state
+			p.emitter.Emit("player.play")
 		}
+		p.playback_state = new_state
 	} else if p.playback_state.Item.ID != new_state.Item.ID {
+		log.Println("PREV URI:", p.playback_state.Item.URI)
+		log.Println("NEW URI:", new_state.Item.URI)
+		log.Println(p.cursor, p.current_tracks)
+
 		if !p.HasItems() || p.cursor == len(p.current_tracks) {
 			// playback has been started somewhere else
+			p.emitter.Emit("player.interrupted")
 		} else if p.current_tracks[p.cursor+1] == new_state.Item.URI {
 			// Track changed to next item
+			p.cursor++
+			if p.cursor == len(p.current_tracks) {
+				p.emitter.Emit("player.empty")
+			} else {
+				p.emitter.Emit("player.changed")
+			}
 		} else {
 			// playback has been started somewhere else
+			p.emitter.Emit("player.interrupted")
 		}
+		p.playback_state = new_state
 	} else {
 		// Update currently playing track
+		if !p.playback_state.Playing && new_state.Playing {
+			// Playback started
+			p.emitter.Emit("player.play")
+		}
 
+		p.playback_state = new_state
 	}
 
 	return nil
