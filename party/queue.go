@@ -26,9 +26,10 @@ func ResumeQueue(conn redis.Conn, id string) (*Queue, error) {
 	if list, err := redis.Strings(conn.Do("LRANGE", QUEUE_PREFIX+id, 0, -1)); err == nil {
 		queue := NewQueue()
 
+		u := &models.ItemUnpacker{}
 		for i := len(list) - 1; i >= 0; i-- {
-			if item, err := models.UnmarshalItem([]byte(list[i])); err == nil {
-				queue.Items = append(queue.Items, item)
+			if err := json.Unmarshal([]byte(list[i]), u); err == nil {
+				queue.Items = append(queue.Items, u.Result)
 			} else {
 				log.Println(err)
 				return nil, err

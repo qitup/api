@@ -35,11 +35,15 @@ func (i *BaseItem) GetType() string {
 	return i.Type
 }
 
-func UnmarshalItem(b []byte) (Item, error) {
+type ItemUnpacker struct {
+	Result Item
+}
+
+func(u *ItemUnpacker) UnmarshalJSON(b []byte) (error) {
 	var m map[string]interface{}
 
 	if err := json.Unmarshal(b, &m); err != nil {
-		return nil, err
+		return err
 	}
 
 	if item_type, ok := m["type"].(string); ok {
@@ -49,17 +53,18 @@ func UnmarshalItem(b []byte) (Item, error) {
 			item = &SpotifyTrack{}
 			break
 		default:
-			return nil, errors.New("invalid item type")
+			return errors.New("invalid item type")
 		}
 
 		if err := json.Unmarshal(b, item); err != nil {
-			return nil, err
+			return err
 		}
 
-		return item, nil
+		u.Result = item
+		return nil
 	}
 
-	return nil, errors.New("item missing type field")
+	return errors.New("item missing type field")
 }
 
 type SpotifyTrack struct {

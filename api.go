@@ -226,7 +226,7 @@ func api(cli *cli.Context) error {
 		party_controller.Connect(context, m)
 	})
 
-	party_group.GET("/push", party_controller.PushHTTP)
+	party_group.POST("/push", party_controller.PushHTTP)
 
 	party_group.GET("/player/play", party_controller.Play)
 

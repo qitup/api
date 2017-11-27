@@ -108,7 +108,7 @@ func (s *Session) ClientDisconnected(client *melody.Session) {
 	}
 }
 
-func (s *Session) Push(client *melody.Session, item models.Item) error {
+func (s *Session) Push(item models.Item) error {
 	conn, err := s.redis.GetConnection()
 	if err != nil {
 		return err
@@ -245,8 +245,13 @@ func (s *Session) GetPlayerForItem(item models.Item) (Player, error) {
 	}
 }
 
-func (s *Session) TransferHost(to bson.ObjectId) {
+func (s *Session) GetParty() *models.Party {
+	return s.party
+}
 
+func (s *Session) TransferHost(to bson.ObjectId) {
+	// Dispose existing players, create new instances with the new host's tokens
+	// Notify the new host if they have a websocket connection
 }
 
 func InitiateConnect(redis redis.Conn, party models.Party, attendee models.Attendee) (string, error) {

@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"log"
 	"github.com/garyburd/redigo/redis"
+	"errors"
 )
 
 type PartyController struct {
@@ -232,39 +233,43 @@ func (c *PartyController) Join(context *gin.Context, cli *cli.Context) {
 }
 
 func (c *PartyController) Leave(context *gin.Context) {
-	party_id := bson.ObjectIdHex(context.Query("id"))
+	party_id := context.Query("id")
+	user_id := bson.ObjectIdHex(context.MustGet("userID").(string))
 
 	session, db := c.Mongo.DB()
 	defer session.Close()
 
-	user_id := bson.ObjectIdHex(context.MustGet("userID").(string))
+	party_session, ok := c.party_sessions[party_id]
 
-	party_record, err := models.PartyByID(db, party_id)
+	var party_record *models.Party
+	var err error
 
-	if err == mgo.ErrNotFound {
-		context.JSON(400, gin.H{
-			"error": gin.H{
-				"code": "party_not_found",
-				"msg":  "party not found",
-			},
-		})
-		return
-	} else if err != nil {
-		context.AbortWithError(500, err)
-		return
+	if ok {
+		party_record = party_session.GetParty()
+	} else {
+		party_record, err = models.PartyByID(db, bson.ObjectIdHex(party_id))
+
+		if err == mgo.ErrNotFound {
+			context.JSON(400, gin.H{
+				"error": gin.H{
+					"code": "party_not_found",
+					"msg":  "party not found",
+				},
+			})
+			return
+		} else if err != nil {
+			context.AbortWithError(500, err)
+			return
+		}
 	}
 
 	if user_id == party_record.HostID {
-		if _, ok := context.GetQuery("transfer_to"); ok {
-			//if session, ok := c.party_sessions[party_record.ID.Hex()]; ok {
-			//	session.
-			//}
-			context.JSON(400, gin.H{})
-			return
-		} else if len(party_record.Attendees) == 0 {
-			// Cleanup the party
-			if session, ok := c.party_sessions[party_record.ID.Hex()]; ok {
-				session.Stop()
+		// Handle a host leaving
+
+		if len(party_record.Attendees) == 0 {
+			// Cleanup the party if it's empty
+			if ok {
+				party_session.Stop()
 				delete(c.party_sessions, party_record.ID.Hex())
 			}
 
@@ -274,17 +279,37 @@ func (c *PartyController) Leave(context *gin.Context) {
 
 			context.JSON(200, bson.M{})
 			return
+		} else if transfer_id, ok := context.GetQuery("transfer_to"); ok {
+			transfer_to := bson.ObjectIdHex(transfer_id)
+
+			if err := party_record.TransferHost(db, transfer_to); err != nil {
+				context.AbortWithError(500, err)
+			}
+
+			if err := party_record.WithHost(db); err != nil {
+				context.AbortWithError(500, err)
+			}
+
+			if ok {
+				party_session.TransferHost(transfer_to)
+			}
+
+			context.JSON(400, gin.H{})
+			return
+
 		} else {
-			// Didn't specify someone to transfer
-			context.JSON(200, bson.M{
+			// Didn't specify someone to transfer to, deny req
+			context.JSON(400, bson.M{
 				"error": gin.H{
 					"code": "transfer_unspecified",
-					"msg": "user to transfer to not specified",
+					"msg":  "user to transfer to not specified",
 				},
 			})
 			return
 		}
 	} else {
+		// Handle an attendee leaving
+
 		err = party_record.RemoveAttendee(db, user_id)
 
 		if err == mgo.ErrNotFound {
@@ -299,9 +324,9 @@ func (c *PartyController) Leave(context *gin.Context) {
 			context.AbortWithError(500, err)
 			return
 		}
-	}
 
-	context.JSON(200, gin.H{})
+		context.JSON(200, gin.H{})
+	}
 }
 
 func (c *PartyController) Connect(context *gin.Context, m *melody.Melody) {
@@ -369,7 +394,9 @@ func (c *PartyController) HandleDisconnect(s *melody.Session) {
 }
 
 func (c *PartyController) PushSocket(s *melody.Session, raw_item json.RawMessage) {
-	item, err := models.UnmarshalItem(raw_item)
+	u := &models.ItemUnpacker{}
+
+	err := json.Unmarshal(raw_item, u)
 
 	if err != nil {
 		error_res, _ := json.Marshal(gin.H{
@@ -384,6 +411,8 @@ func (c *PartyController) PushSocket(s *melody.Session, raw_item json.RawMessage
 		return
 	}
 
+	item := u.Result
+
 	user_id := s.MustGet("user_id").(string)
 	item.Added(bson.ObjectIdHex(user_id))
 
@@ -391,7 +420,7 @@ func (c *PartyController) PushSocket(s *melody.Session, raw_item json.RawMessage
 
 	if session, ok := c.party_sessions[party_id.(string)]; ok {
 		// Cleanup session from the party map
-		if err := session.Push(s, item); err != nil {
+		if err := session.Push(item); err != nil {
 			log.Println("Failed pushing item to queue", err)
 			return
 		}
@@ -401,7 +430,36 @@ func (c *PartyController) PushSocket(s *melody.Session, raw_item json.RawMessage
 }
 
 func (c *PartyController) PushHTTP(context *gin.Context) {
+	u := &models.ItemUnpacker{}
 
+	err := context.BindJSON(u)
+
+	if err != nil {
+		context.JSON(400, gin.H{
+			"type": "error",
+			"error": gin.H{
+				"code": "invalid_json",
+				"msg":  "Invalid JSON message",
+			},
+		})
+		return
+	}
+
+	item := u.Result
+
+	user_id := context.MustGet("userID").(string)
+	item.Added(bson.ObjectIdHex(user_id))
+
+	party_id := context.Query("id")
+
+	if session, ok := c.party_sessions[party_id]; ok {
+		// Cleanup session from the party map
+		if err := session.Push(item); err != nil {
+			context.AbortWithError(500, err)
+		}
+	} else {
+		context.AbortWithError(500, errors.New("No party session exists for (%s), something's fucky"+party_id))
+	}
 }
 
 func (c *PartyController) Play(context *gin.Context) {

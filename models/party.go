@@ -215,3 +215,18 @@ func (p *Party) WithHost(db *mgo.Database) (error) {
 func (p *Party) Remove(db *mgo.Database) error {
 	return db.C(PARTY_COLLECTION).RemoveId(p.ID)
 }
+
+func (p *Party) TransferHost(db *mgo.Database, to bson.ObjectId) error {
+	err := db.C(PARTY_COLLECTION).Update(bson.M{
+		"_id": p.ID,
+	}, bson.M{
+		"$pull": bson.M{"attendees": bson.M{"user_id": to}},
+		"$set":  bson.M{"host_id": to},
+	})
+
+	if err == nil {
+		p.HostID = to
+	}
+
+	return err
+}
