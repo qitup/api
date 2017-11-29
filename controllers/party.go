@@ -300,7 +300,14 @@ func (c *PartyController) Leave(context *gin.Context) {
 			}
 
 			if ok {
-				party_session.TransferHost(transfer_to)
+				transfer_user, err := models.UserByID(db, transfer_to)
+
+				if err != nil {
+					context.AbortWithError(500, err)
+					return
+				}
+
+				party_session.TransferHost(*transfer_user)
 			}
 
 			context.JSON(200, gin.H{})

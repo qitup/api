@@ -30,7 +30,7 @@ type Session struct {
 	mongo         *store.MongoStore
 	redis         *store.RedisStore
 	party         *models.Party
-	clients       map[*melody.Session]*melody.Session
+	clients       map[string]*melody.Session
 	queue         *Queue
 	players       map[string]Player
 	CurrentPlayer Player
@@ -43,7 +43,7 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 		mongo:   mongo,
 		redis:   redis_store,
 		party:   party,
-		clients: make(map[*melody.Session]*melody.Session),
+		clients: make(map[string]*melody.Session),
 		queue:   queue,
 		players: make(map[string]Player),
 		emitter: emitter.New(10),
@@ -140,9 +140,11 @@ func (s *Session) ClientConnected(client *melody.Session) {
 	attendee_count := len(s.clients)
 	log.Println("Connected to party with", attendee_count, "other active attendees")
 
+	user_id := client.MustGet("user_id").(string)
+
 	res, _ := json.Marshal(gin.H{
 		"type": "attendee.active",
-		"user": client.MustGet("user_id"),
+		"user": user_id,
 	})
 
 	for _, sess := range s.clients {
@@ -151,11 +153,12 @@ func (s *Session) ClientConnected(client *melody.Session) {
 		}
 	}
 
-	s.clients[client] = client
+	s.clients[user_id] = client
 }
 
 func (s *Session) ClientDisconnected(client *melody.Session) {
-	delete(s.clients, client)
+	user_id := client.MustGet("user_id").(string)
+	delete(s.clients, user_id)
 
 	attendee_count := len(s.clients)
 	log.Println("Left session with", attendee_count, "other active attendees")
@@ -163,7 +166,7 @@ func (s *Session) ClientDisconnected(client *melody.Session) {
 	// Notify others this attendee has disconnected
 	res, _ := json.Marshal(gin.H{
 		"type": "attendee.offline",
-		"user": client.MustGet("user_id"),
+		"user": user_id,
 	})
 
 	for _, sess := range s.clients {
@@ -322,7 +325,7 @@ func (s *Session) GetParty() *models.Party {
 func (s *Session) AttendeesChanged() error {
 	event, err := json.Marshal(gin.H{
 		"type":      "attendees.change",
-		"attendees": s.queue,
+		"attendees": s.party.Attendees,
 	})
 
 	if err != nil {
@@ -338,9 +341,35 @@ func (s *Session) AttendeesChanged() error {
 	return nil
 }
 
-func (s *Session) TransferHost(to bson.ObjectId) {
+func (s *Session) TransferHost(to models.User) error {
 	// Dispose existing players, create new instances with the new host's tokens
 	// Notify the new host if they have a websocket connection
+	if s.CurrentPlayer != nil {
+		if err := s.CurrentPlayer.Pause(); err != nil {
+			log.Println("Error pausing previous host's player", err)
+		}
+		s.CurrentPlayer = nil
+	}
+
+	for key := range s.players {
+		delete(s.players, key)
+	}
+
+	// Notify the new host if they have a websocket connection
+	if client, ok := s.clients[to.ID.Hex()]; ok {
+		event, err := json.Marshal(gin.H{
+			"type": "host.promotion",
+			"host": to,
+		})
+
+		if err != nil {
+			return err
+		}
+
+		client.Write(event)
+	}
+
+	return nil
 }
 
 func InitiateConnect(redis redis.Conn, party models.Party, attendee bson.ObjectId) (string, error) {
