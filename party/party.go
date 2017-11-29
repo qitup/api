@@ -50,8 +50,8 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 	}
 
 	go (func() {
-		change := session.emitter.On("player.change")
-		start := session.emitter.On("player.start")
+		change := session.emitter.On("player.track_finished")
+		play := session.emitter.On("player.play")
 		interrupt := session.emitter.On("player.interrupted")
 		pause := session.emitter.On("player.pause")
 		for {
@@ -80,8 +80,11 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 					}
 				}
 				break
-			case <-start:
-				log.Println("START")
+			case <-play:
+				log.Println("PLAY")
+
+				session.queue.Items[0].Play()
+
 				event, _ := json.Marshal(map[string]interface{}{
 					"type": "player.play",
 				})

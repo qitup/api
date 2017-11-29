@@ -41,8 +41,7 @@ type SpotifyPlayer struct {
 	refreshing     sync.RWMutex // Locked whilst refreshing host's access token
 	playback_state *spotify.PlayerState
 	device_id      *string
-	current_tracks []spotify.URI
-	cursor         int
+	current_items  []models.Item
 
 	// Send true to this channel when a party becomes inactive
 	stop   chan bool
@@ -57,7 +56,6 @@ func New(emitter *emitter.Emitter, token *oauth2.Token, device_id *string) (*Spo
 		playback_state: nil,
 		device_id:      device_id,
 		stop:           make(chan bool),
-		cursor:         -1,
 	}, nil
 }
 
@@ -84,8 +82,9 @@ func (p *SpotifyPlayer) Play(items []models.Item) (error) {
 	if err := p.client.PlayOpt(&opt); err != nil {
 		return err
 	}
-	p.current_tracks = uris
-	p.cursor = 0
+	p.emitter.Emit("player.play")
+
+	p.current_items = items
 	p.startPolling(POLL_INTERVAL)
 	return nil
 }
@@ -123,7 +122,7 @@ func (p *SpotifyPlayer) Previous() (error) {
 }
 
 func (p *SpotifyPlayer) HasItems() (bool) {
-	return p.cursor != -1 && p.cursor <= len(p.current_tracks)
+	return p.current_items != nil
 }
 
 func (p *SpotifyPlayer) stopPolling() {
@@ -171,6 +170,22 @@ func (p *SpotifyPlayer) poll() {
 	}
 }
 
+func (p *SpotifyPlayer) peekNext() spotify.URI {
+	if len(p.current_items) <= 1 {
+		return ""
+	}
+
+	item := p.current_items[1]
+	switch item.(type) {
+	case *models.SpotifyTrack:
+		track := item.(*models.SpotifyTrack)
+		return track.URI
+		break
+	}
+
+	return ""
+}
+
 func (p *SpotifyPlayer) UpdateState(new_state *spotify.PlayerState) (error) {
 	log.Println("PREV:", p.playback_state)
 	log.Println("NEW:", new_state)
@@ -180,37 +195,36 @@ func (p *SpotifyPlayer) UpdateState(new_state *spotify.PlayerState) (error) {
 			// Playback started
 			p.emitter.Emit("player.play")
 		}
-		p.playback_state = new_state
 	} else if p.playback_state.Item.ID != new_state.Item.ID {
 		log.Println("PREV URI:", p.playback_state.Item.URI)
 		log.Println("NEW URI:", new_state.Item.URI)
-		log.Println(p.cursor, p.current_tracks)
+		log.Println("NEXT TRACK:", p.peekNext())
 
-		if !p.HasItems() || p.cursor == len(p.current_tracks) {
-			// playback has been started somewhere else
+		if !p.HasItems() {
+			// playback of something else has been started somewhere
 			p.emitter.Emit("player.interrupted")
-		} else if p.current_tracks[p.cursor+1] == new_state.Item.URI {
+		} else if p.peekNext() == new_state.Item.URI {
 			// Track changed to next item
-			p.cursor++
-			if p.cursor == len(p.current_tracks) {
-				p.emitter.Emit("player.empty")
-			} else {
-				p.emitter.Emit("player.changed")
-			}
+			_, p.current_items = p.current_items[0], p.current_items[:1]
+			p.emitter.Emit("player.track_finished")
+		} else if len(p.current_items) == 1 && p.playback_state.Playing && !new_state.Playing {
+			_, p.current_items = p.current_items[0], p.current_items[:1]
+			p.emitter.Emit("player.done")
 		} else {
 			// playback has been started somewhere else
 			p.emitter.Emit("player.interrupted")
 		}
-		p.playback_state = new_state
 	} else {
 		// Update currently playing track
 		if !p.playback_state.Playing && new_state.Playing {
 			// Playback started
 			p.emitter.Emit("player.play")
+		} else if p.playback_state.Playing && !new_state.Playing {
+			p.emitter.Emit("player.paused")
 		}
-
-		p.playback_state = new_state
 	}
+
+	p.playback_state = new_state
 
 	return nil
 }

@@ -149,6 +149,19 @@ func (c *PartyController) Join(context *gin.Context, cli *cli.Context) {
 
 	party_record, err := models.PartyByCode(db, code)
 
+	if err == mgo.ErrNotFound {
+		context.JSON(400, gin.H{
+			"error": gin.H{
+				"code": "party_not_found",
+				"msg":  "party not found",
+			},
+		})
+		return
+	} else if err != nil {
+		context.AbortWithError(500, err)
+		return
+	}
+
 	party_session, ok := c.party_sessions[party_record.ID.Hex()]
 
 	conn, err := c.Redis.GetConnection()
@@ -170,19 +183,6 @@ func (c *PartyController) Join(context *gin.Context, cli *cli.Context) {
 		c.party_sessions[party_record.ID.Hex()] = party_session
 	} else {
 		context.AbortWithError(500, err)
-	}
-
-	if err == mgo.ErrNotFound {
-		context.JSON(400, gin.H{
-			"error": gin.H{
-				"code": "party_not_found",
-				"msg":  "party not found",
-			},
-		})
-		return
-	} else if err != nil {
-		context.AbortWithError(500, err)
-		return
 	}
 
 	user, err := models.UserByID(db, bson.ObjectIdHex(context.GetString("userID")))
