@@ -300,6 +300,10 @@ func (c *PartyController) Leave(context *gin.Context) {
 			}
 
 			if ok {
+				if err := party_session.AttendeesChanged(); err != nil {
+					context.AbortWithError(500, err)
+				}
+
 				transfer_user, err := models.UserByID(db, transfer_to)
 
 				if err != nil {
@@ -339,6 +343,12 @@ func (c *PartyController) Leave(context *gin.Context) {
 		} else if err != nil {
 			context.AbortWithError(500, err)
 			return
+		}
+
+		if ok {
+			if err := party_session.AttendeesChanged(); err != nil {
+				context.AbortWithError(500, err)
+			}
 		}
 
 		context.JSON(200, gin.H{})
