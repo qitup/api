@@ -62,13 +62,11 @@ func (c *UserController) CompleteUserAuth(context *gin.Context, assume_identity 
 }
 
 func (c *UserController) Signup(context *gin.Context, host string, key []byte) {
-	type form struct {
+	var fields struct {
 		Email    string `json:"email" binding:"required"`
 		Password string `json:"password" binding:"required"`
 		Username string `json:"username" binding:"required"`
 	}
-
-	var fields form
 
 	if context.BindJSON(&fields) != nil {
 		context.JSON(400, gin.H{
@@ -118,12 +116,10 @@ func (c *UserController) Signup(context *gin.Context, host string, key []byte) {
 }
 
 func (c *UserController) Login(context *gin.Context, host string, key []byte) {
-	type form struct {
+	var loginVals struct {
 		Email    string `json:"email" binding:"required"`
 		Password string `json:"password" binding:"required"`
 	}
-
-	var loginVals form
 
 	if context.BindJSON(&loginVals) != nil {
 		context.JSON(400, gin.H{"code": 400, "message": "Missing Username or Password"})

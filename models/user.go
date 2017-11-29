@@ -16,6 +16,7 @@ type APIClaims struct {
 	Email    string `json:"email"`
 	Name     string `json:"name"`
 	Username string `json:"username"`
+	CanHost  bool   `json:"can_host"`
 }
 
 const USER_COLLECTION = "users"
@@ -134,6 +135,7 @@ func (u *User) NewToken(host string, signing_key []byte) (string, error) {
 		Email:    u.Email,
 		Name:     u.Name,
 		Username: u.Username,
+		CanHost:  u.CanHost,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
