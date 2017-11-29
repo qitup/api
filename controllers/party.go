@@ -86,8 +86,6 @@ func (c *PartyController) Create(context *gin.Context, cli *cli.Context) {
 			return
 		}
 
-		attendee := models.NewAttendee(bson.ObjectIdHex(context.GetString("userID")))
-
 		conn, err := c.Redis.GetConnection()
 		if err != nil {
 			context.AbortWithError(500, err)
@@ -99,7 +97,7 @@ func (c *PartyController) Create(context *gin.Context, cli *cli.Context) {
 
 		c.party_sessions[party_record.ID.Hex()] = session
 
-		connect_token, err := party.InitiateConnect(conn, party_record, attendee)
+		connect_token, err := party.InitiateConnect(conn, party_record, bson.ObjectIdHex(context.GetString("userID")))
 
 		var ws_protocol string
 		if cli.Bool("secured") {
@@ -151,6 +149,29 @@ func (c *PartyController) Join(context *gin.Context, cli *cli.Context) {
 
 	party_record, err := models.PartyByCode(db, code)
 
+	party_session, ok := c.party_sessions[party_record.ID.Hex()]
+
+	conn, err := c.Redis.GetConnection()
+	if err != nil {
+		context.AbortWithError(500, err)
+	}
+	defer conn.Close()
+
+	if ok {
+		party_record = party_session.GetParty()
+	} else if queue, err := party.ResumeQueue(conn, party_record.ID.Hex()); err == nil {
+		party_session = party.NewSession(party_record, queue, c.Mongo, c.Redis)
+
+		c.party_sessions[party_record.ID.Hex()] = party_session
+	} else if err == redis.ErrNil {
+		queue = party.NewQueue()
+		party_session = party.NewSession(party_record, queue, c.Mongo, c.Redis)
+
+		c.party_sessions[party_record.ID.Hex()] = party_session
+	} else {
+		context.AbortWithError(500, err)
+	}
+
 	if err == mgo.ErrNotFound {
 		context.JSON(400, gin.H{
 			"error": gin.H{
@@ -164,18 +185,22 @@ func (c *PartyController) Join(context *gin.Context, cli *cli.Context) {
 		return
 	}
 
-	attendee := models.NewAttendee(bson.ObjectIdHex(context.GetString("userID")))
+	user, err := models.UserByID(db, bson.ObjectIdHex(context.GetString("userID")))
 
-	conn, err := c.Redis.GetConnection()
 	if err != nil {
 		context.AbortWithError(500, err)
 	}
-	defer conn.Close()
 
-	connect_token, err := party.InitiateConnect(conn, *party_record, attendee)
+	attendee := models.NewAttendee(*user)
+
+	connect_token, err := party.InitiateConnect(conn, *party_record, user.ID)
 
 	if attendee.UserId != party_record.HostID {
 		if err := party_record.AddAttendee(db, &attendee); err != nil && err != mgo.ErrNotFound {
+			context.AbortWithError(500, err)
+		}
+
+		if err := party_session.AttendeesChanged(); err != nil {
 			context.AbortWithError(500, err)
 		}
 	}
@@ -199,24 +224,7 @@ func (c *PartyController) Join(context *gin.Context, cli *cli.Context) {
 		res := gin.H{
 			"url":   connect_url + "/party/connect/" + url.PathEscape(connect_token),
 			"party": party_record,
-		}
-
-		// Add the queue's contents to the response if available
-		if session, ok := c.party_sessions[party_record.ID.Hex()]; ok {
-			res["queue"] = session.GetQueue()
-		} else if queue, err := party.ResumeQueue(conn, party_record.ID.Hex()); err == nil {
-			session := party.NewSession(party_record, queue, c.Mongo, c.Redis)
-
-			c.party_sessions[party_record.ID.Hex()] = session
-			res["queue"] = queue
-		} else if err == redis.ErrNil {
-			queue = party.NewQueue()
-			session := party.NewSession(party_record, queue, c.Mongo, c.Redis)
-
-			c.party_sessions[party_record.ID.Hex()] = session
-			res["queue"] = queue
-		} else {
-			context.AbortWithError(500, err)
+			"queue": party_session.GetQueue(),
 		}
 
 		context.JSON(200, res)

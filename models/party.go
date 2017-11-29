@@ -41,9 +41,10 @@ func NewParty(host_id bson.ObjectId, name, join_code string) (Party) {
 	}
 }
 
-func NewAttendee(user_id bson.ObjectId) Attendee {
+func NewAttendee(user User) Attendee {
 	return Attendee{
-		UserId:   user_id,
+		UserId:   user.ID,
+		User:     user,
 		JoinedAt: time.Now(),
 	}
 }

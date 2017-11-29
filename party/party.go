@@ -319,13 +319,32 @@ func (s *Session) GetParty() *models.Party {
 	return s.party
 }
 
+func (s *Session) AttendeesChanged() error {
+	event, err := json.Marshal(gin.H{
+		"type":      "attendees.change",
+		"attendees": s.queue,
+	})
+
+	if err != nil {
+		return err
+	}
+
+	for _, sess := range s.clients {
+		if writeErr := sess.Write(event); writeErr != nil {
+			log.Println(writeErr)
+		}
+	}
+
+	return nil
+}
+
 func (s *Session) TransferHost(to bson.ObjectId) {
 	// Dispose existing players, create new instances with the new host's tokens
 	// Notify the new host if they have a websocket connection
 }
 
-func InitiateConnect(redis redis.Conn, party models.Party, attendee models.Attendee) (string, error) {
-	token := attendee.UserId.Hex() + party.JoinCode
+func InitiateConnect(redis redis.Conn, party models.Party, attendee bson.ObjectId) (string, error) {
+	token := attendee.Hex() + party.JoinCode
 	hasher := sha1.New()
 	hasher.Write([]byte(token))
 	sha := base64.URLEncoding.EncodeToString(hasher.Sum(nil))
