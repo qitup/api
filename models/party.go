@@ -232,6 +232,13 @@ func (p *Party) TransferHost(db *mgo.Database, to bson.ObjectId) error {
 
 	if err == nil {
 		p.HostID = to
+
+		for i, user := range p.Attendees {
+			if user.UserId == to {
+				p.Attendees = append(p.Attendees[:i], p.Attendees[i+1:]...)
+				break
+			}
+		}
 	}
 
 	return err
