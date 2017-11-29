@@ -57,8 +57,9 @@ func (c *PartyController) Create(context *gin.Context, cli *cli.Context) {
 	defer session.Close()
 
 	var data struct {
-		Name     string `json:"name"`
-		JoinCode string `json:"join_code"`
+		Name     string          `json:"name"`
+		JoinCode string          `json:"join_code"`
+		Settings models.Settings `json:"settings"`
 	}
 
 	user_id := bson.ObjectIdHex(context.MustGet("userID").(string))
@@ -294,7 +295,7 @@ func (c *PartyController) Leave(context *gin.Context) {
 				party_session.TransferHost(transfer_to)
 			}
 
-			context.JSON(400, gin.H{})
+			context.JSON(200, gin.H{})
 			return
 
 		} else {
@@ -469,8 +470,8 @@ func (c *PartyController) Play(context *gin.Context) {
 		context.AbortWithStatusJSON(400, gin.H{
 			"type": "error",
 			"error": gin.H{
-				"code": "invalid_party_id",
-				"msg":  "Invalid party id",
+				"code": "invalid_party",
+				"msg":  "Invalid party",
 			},
 		})
 	}
@@ -491,8 +492,8 @@ func (c *PartyController) Pause(context *gin.Context) {
 		context.AbortWithStatusJSON(400, gin.H{
 			"type": "error",
 			"error": gin.H{
-				"code": "invalid_party_id",
-				"msg":  "Invalid party id",
+				"code": "invalid_party",
+				"msg":  "Invalid party",
 			},
 		})
 	}
@@ -513,8 +514,8 @@ func (c *PartyController) Next(context *gin.Context) {
 		context.AbortWithStatusJSON(400, gin.H{
 			"type": "error",
 			"error": gin.H{
-				"code": "invalid_party_id",
-				"msg":  "Invalid party id",
+				"code": "invalid_party",
+				"msg":  "Invalid party",
 			},
 		})
 	}

@@ -7,6 +7,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 	"errors"
 	"dubclan/api/store"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type UserController struct {
@@ -34,7 +35,7 @@ func (c *UserController) CompleteUserAuth(context *gin.Context, assume_identity 
 
 	if user_id, exists := context.Get("userID"); exists {
 		id := bson.ObjectIdHex(user_id.(string))
-		if err := models.UpdateIdentityById(db, id, assume_identity); err == nil {
+		if err := models.UpdateUserIdentity(db, id, assume_identity); err == nil {
 			return &models.User{ID: id}, nil
 		} else {
 			return nil, err
@@ -58,6 +59,103 @@ func (c *UserController) CompleteUserAuth(context *gin.Context, assume_identity 
 			return nil, err
 		}
 	}
+}
+
+func (c *UserController) Signup(context *gin.Context, host string, key []byte) {
+	type form struct {
+		Email    string `json:"email" binding:"required"`
+		Password string `json:"password" binding:"required"`
+		Username string `json:"username" binding:"required"`
+	}
+
+	var fields form
+
+	if context.BindJSON(&fields) != nil {
+		context.JSON(400, gin.H{
+			"code":    400,
+			"message": "Missing required signup fields",
+		})
+		return
+	}
+
+	session, db := c.Mongo.DB()
+	defer session.Close()
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(fields.Password), bcrypt.DefaultCost)
+	if err != nil {
+		context.AbortWithError(500, err)
+	}
+
+	new_user := &models.User{
+		ID:       bson.NewObjectId(),
+		CanHost:  false,
+		Email:    fields.Email,
+		Username: fields.Username,
+		Password: hash,
+	}
+
+	// Ensure account doesnt exist
+	if err := new_user.Insert(db); err != nil {
+		if mgo.IsDup(err) {
+			context.JSON(400, gin.H{
+				"code":    400,
+				"message": "Account already exists",
+			})
+			return
+		}
+		context.AbortWithError(500, err)
+		return
+	}
+
+	token, err := new_user.NewToken(host, key)
+	if err != nil {
+		context.AbortWithError(500, err)
+	}
+
+	context.JSON(200, bson.M{
+		"token": token,
+	})
+}
+
+func (c *UserController) Login(context *gin.Context, host string, key []byte) {
+	type form struct {
+		Email    string `json:"email" binding:"required"`
+		Password string `json:"password" binding:"required"`
+	}
+
+	var loginVals form
+
+	if context.BindJSON(&loginVals) != nil {
+		context.JSON(400, gin.H{"code": 400, "message": "Missing Username or Password"})
+		return
+	}
+
+	session, db := c.Mongo.DB()
+	defer session.Close()
+
+	user, err := models.Authenticate(db, loginVals.Email, []byte(loginVals.Password))
+
+	if err != nil {
+		if err == bcrypt.ErrMismatchedHashAndPassword || err == mgo.ErrNotFound {
+			context.JSON(401, gin.H{"code": 401, "message": "Incorrect Email / Password"})
+			return
+		}
+
+		context.AbortWithError(500, err)
+		return
+	}
+
+	// Create the token
+	tokenString, err := user.NewToken(host, key)
+
+	if err != nil {
+		context.AbortWithError(500, err)
+		return
+	}
+
+	context.JSON(200, gin.H{
+		"token":  tokenString,
+	})
 }
 
 func (c *UserController) Me(context *gin.Context) {

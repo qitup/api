@@ -8,6 +8,7 @@ import (
 	"strings"
 	"github.com/Pallinder/go-randomdata"
 	"golang.org/x/oauth2"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type APIClaims struct {
@@ -27,6 +28,7 @@ type User struct {
 	Name       string        `json:"name" bson:"name"`
 	AvatarURL  string        `json:"avatar_url" bson:"avatar_url"`
 	CanHost    bool          `json:"can_host" bson:"can_host"`
+	Password   []byte        `json:"-" bson:"password,omitempty"`
 }
 
 type Users []User
@@ -51,6 +53,11 @@ type Identity struct {
 
 func (u *User) Save(db *mgo.Database) error {
 	_, err := db.C(USER_COLLECTION).Upsert(bson.M{"_id": u.ID}, u)
+	return err
+}
+
+func (u *User) Insert(db *mgo.Database) error {
+	err := db.C(USER_COLLECTION).Insert(u)
 	return err
 }
 
@@ -91,7 +98,7 @@ func UpdateUserByIdentity(db *mgo.Database, identity Identity) (*User, error) {
 	return &user, err
 }
 
-func UpdateIdentityById(db *mgo.Database, id bson.ObjectId, identity Identity) (error) {
+func UpdateUserIdentity(db *mgo.Database, id bson.ObjectId, identity Identity) (error) {
 	bulk := db.C(USER_COLLECTION).Bulk()
 
 	pairs := []interface{}{
@@ -119,7 +126,7 @@ func (u *User) NewToken(host string, signing_key []byte) (string, error) {
 	claims := APIClaims{
 		StandardClaims: jwt.StandardClaims{
 			IssuedAt:  time.Now().Unix(),
-			ExpiresAt: time.Now().Add(time.Hour * 6).Unix(),
+			ExpiresAt: time.Now().Add(time.Hour * 5).Unix(),
 			Issuer:    host,
 			Subject:   u.ID.Hex(),
 			Audience:  "qitup-app",
@@ -172,4 +179,22 @@ func (u *User) GetIdentityToken(provider string) *oauth2.Token {
 	}
 
 	return nil
+}
+
+func Authenticate(db *mgo.Database, email string, password []byte) (*User, error) {
+	var user User
+
+	err := db.C(USER_COLLECTION).Find(bson.M{
+		"email": email,
+	}).One(&user)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if err := bcrypt.CompareHashAndPassword(user.Password, password); err != nil {
+		return nil, err
+	}
+
+	return &user, nil
 }

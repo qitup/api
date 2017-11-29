@@ -104,6 +104,16 @@ func api(cli *cli.Context) error {
 		panic(err)
 	}
 
+	index = mgo.Index{
+		Key:    []string{"email"},
+		Unique: true,
+	}
+
+	err = session.DB(cli.String("database")).C(models.USER_COLLECTION).EnsureIndex(index)
+	if err != nil {
+		panic(err)
+	}
+
 	// Initialize controllers
 	var (
 		user_controller  = controllers.NewUserController(mongo_store, redis_store)
@@ -135,8 +145,8 @@ func api(cli *cli.Context) error {
 	auth_middleware := &jwt_middleware.GinJWTMiddleware{
 		Realm:      "api",
 		Key:        signing_key,
-		Timeout:    time.Hour,
-		MaxRefresh: time.Hour,
+		Timeout:    time.Hour * 5,
+		MaxRefresh: time.Hour * 24,
 
 		TimeFunc: time.Now,
 
@@ -144,6 +154,14 @@ func api(cli *cli.Context) error {
 			return claims["sub"].(string)
 		},
 	}
+
+	router.POST("/login", func(context *gin.Context) {
+		user_controller.Login(context, cli.String("host"), signing_key)
+	})
+
+	router.POST("/signup", func(context *gin.Context) {
+		user_controller.Signup(context, cli.String("host"), signing_key)
+	})
 
 	router.GET("/auth/:provider/callback", func(context *gin.Context) {
 		identity, err := gothic.CompleteUserAuth(context.Writer, context.Request)
