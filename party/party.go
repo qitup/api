@@ -16,6 +16,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 	"time"
 	"sync"
+	"golang.org/x/tools/go/gcimporter15/testdata"
 )
 
 const (
@@ -91,7 +92,7 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 					_, err = session.queue.Pop(conn, session.party.ID.Hex())
 					conn.Close()
 
-					if ev.Bool(0) {
+					if !ev.Bool(0) {
 						session.PlayHead()
 					}
 
@@ -302,6 +303,7 @@ func (s *Session) Pause() (error) {
 		if err := s.CurrentPlayer.Pause(); err != nil {
 			return err
 		} else {
+			s.PauseHead()
 			s.setupTimeout()
 			s.state = PAUSED
 		}
