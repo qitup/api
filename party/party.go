@@ -16,7 +16,6 @@ import (
 	"gopkg.in/mgo.v2/bson"
 	"time"
 	"sync"
-	"golang.org/x/tools/go/gcimporter15/testdata"
 )
 
 const (
