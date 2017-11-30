@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"gopkg.in/mgo.v2/bson"
 	"time"
+	"sync"
 )
 
 const (
@@ -48,6 +49,9 @@ type Session struct {
 	emitter       *emitter.Emitter
 	timeout       <-chan time.Time
 	state         int
+
+	stop   chan bool
+	waiter sync.WaitGroup
 }
 
 func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redis_store *store.RedisStore) (*Session) {
@@ -60,113 +64,155 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 		players: make(map[string]Player),
 		emitter: emitter.New(10),
 		state:   READY,
+		stop:    make(chan bool),
 	}
 
-	go (func() {
+	session.setupTimeout()
+
+	session.waiter.Add(1)
+	go (func(stop <-chan bool) {
 		change := session.emitter.On("player.track_finished")
 		play := session.emitter.On("player.play")
 		interrupt := session.emitter.On("player.interrupted")
 		pause := session.emitter.On("player.pause")
 		for {
 			select {
-			case <-change:
-				log.Println("CHANGE")
-				conn, err := redis_store.GetConnection()
+			case _, ok := <-change:
+				if ok {
+					log.Println("CHANGE")
+					conn, err := redis_store.GetConnection()
 
-				if err != nil {
-					panic(err)
-				}
-
-				_, err = session.queue.Pop(conn, session.party.ID.Hex())
-				conn.Close()
-
-				if session.CurrentPlayer != nil && !session.CurrentPlayer.HasItems() {
-					session.Play()
-				}
-
-				event, err := json.Marshal(gin.H{
-					"queue": session.queue,
-					"type":  "queue.change",
-				})
-
-				for _, client := range session.clients {
-					if writeErr := client.Write(event); writeErr != nil {
-						log.Println(writeErr)
+					if err != nil {
+						panic(err)
 					}
+
+					_, err = session.queue.Pop(conn, session.party.ID.Hex())
+
+					if session.CurrentPlayer.HasItems() {
+						session.queue.Items[0].Play()
+						err = session.queue.UpdateHead(conn, session.party.ID.Hex())
+					}
+
+					conn.Close()
+
+					if session.CurrentPlayer != nil && !session.CurrentPlayer.HasItems() {
+						session.Play()
+					}
+
+					event, err := json.Marshal(gin.H{
+						"queue": session.queue,
+						"type":  "queue.change",
+					})
+
+					session.writeToClients(event)
 				}
 				break
-			case <-interrupt:
-				session.state = INTERRUPTED
-				log.Println("INTERRUPT")
-				event, _ := json.Marshal(map[string]interface{}{
-					"type": "player.interrupted",
-				})
+			case _, ok := <-interrupt:
+				if ok {
+					session.state = INTERRUPTED
+					log.Println("INTERRUPT")
+					event, _ := json.Marshal(map[string]interface{}{
+						"type": "player.interrupted",
+					})
 
-				for _, sess := range session.clients {
-					if writeErr := sess.Write(event); writeErr != nil {
-						log.Println(writeErr)
-					}
-				}
-
-				break
-
-			case <-play:
-				session.queue.Items[0].Play()
-				session.state = PLAYING
-				log.Println("PLAY")
-
-				conn, err := redis_store.GetConnection()
-
-				if err != nil {
-					panic(err)
-				}
-				session.queue.UpdateHead(conn, session.party.ID.Hex())
-				conn.Close()
-
-				event, _ := json.Marshal(map[string]interface{}{
-					"type": "player.play",
-				})
-
-				for _, sess := range session.clients {
-					if writeErr := sess.Write(event); writeErr != nil {
-						log.Println(writeErr)
-					}
+					session.writeToClients(event)
 				}
 				break
-			case <-pause:
-				session.queue.Items[0].Pause()
-				session.state = PAUSED
-				log.Println("PAUSED")
 
-				conn, err := redis_store.GetConnection()
+			case _, ok := <-play:
+				if ok && len(session.queue.Items) > 0 {
+					session.queue.Items[0].Play()
+					session.state = PLAYING
+					log.Println("PLAY")
 
-				if err != nil {
-					panic(err)
-				}
-				session.queue.UpdateHead(conn, session.party.ID.Hex())
-				conn.Close()
+					conn, err := redis_store.GetConnection()
 
-				event, _ := json.Marshal(map[string]interface{}{
-					"type": "player.pause",
-				})
-
-				for _, sess := range session.clients {
-					if writeErr := sess.Write(event); writeErr != nil {
-						log.Println(writeErr)
+					if err != nil {
+						panic(err)
 					}
-				}
+					session.queue.UpdateHead(conn, session.party.ID.Hex())
+					conn.Close()
 
+					event, _ := json.Marshal(map[string]interface{}{
+						"type": "player.play",
+					})
+
+					session.writeToClients(event)
+				}
 				break
+
+			case _, ok := <-pause:
+				if ok && len(session.queue.Items) > 0 {
+					session.queue.Items[0].Pause()
+					session.state = PAUSED
+					log.Println("PAUSED")
+
+					conn, err := redis_store.GetConnection()
+
+					if err != nil {
+						panic(err)
+					}
+					session.queue.UpdateHead(conn, session.party.ID.Hex())
+					conn.Close()
+
+					event, _ := json.Marshal(map[string]interface{}{
+						"type": "player.pause",
+					})
+
+					session.writeToClients(event)
+				}
+				break
+
+			case <-stop:
+				session.waiter.Done()
+				return
 			}
 		}
-	})()
+	})(session.stop)
 
 	return session
 }
 
+func (s *Session) writeToClients(msg []byte) {
+	for id, client := range s.clients {
+		if writeErr := client.Write(msg); writeErr != nil {
+			if writeErr.Error() == "session is closed" {
+				delete(s.clients, id)
+			} else {
+				log.Println(writeErr)
+			}
+		}
+	}
+}
+
 func (s *Session) setupTimeout() {
 	if s.timeout == nil {
-		s.timeout = time.After(s.party.Settings.Timeout)
+		s.timeout = time.After(time.Minute * s.party.Settings.Timeout)
+		s.waiter.Add(1)
+
+		go (func(timeout <-chan time.Time, stop <-chan bool) {
+			for {
+				select {
+				case _, ok := <-timeout:
+					if ok {
+						log.Println("PARTY TIMEOUT")
+					} else {
+						log.Println("TIMEOUT CLEARED")
+					}
+					s.waiter.Done()
+					return
+				case <-stop:
+					s.waiter.Done()
+					return
+				}
+			}
+		})(s.timeout, s.stop)
+	}
+}
+
+func (s *Session) clearTimeout() {
+	if s.timeout != nil {
+		//close(s.timeout)
 	}
 }
 
@@ -180,16 +226,12 @@ func (s *Session) ClientConnected(client *melody.Session) {
 
 	user_id := client.MustGet("user_id").(string)
 
-	res, _ := json.Marshal(gin.H{
+	event, _ := json.Marshal(gin.H{
 		"type": "attendee.active",
 		"user": user_id,
 	})
 
-	for _, sess := range s.clients {
-		if writeErr := sess.Write(res); writeErr != nil {
-			log.Println(writeErr)
-		}
-	}
+	s.writeToClients(event)
 
 	s.clients[user_id] = client
 }
@@ -202,16 +244,12 @@ func (s *Session) ClientDisconnected(client *melody.Session) {
 	log.Println("Left session with", attendee_count, "other active attendees")
 
 	// Notify others this attendee has disconnected
-	res, _ := json.Marshal(gin.H{
+	event, _ := json.Marshal(gin.H{
 		"type": "attendee.offline",
 		"user": user_id,
 	})
 
-	for _, sess := range s.clients {
-		if writeErr := sess.Write(res); writeErr != nil {
-			log.Println(writeErr)
-		}
-	}
+	s.writeToClients(event)
 }
 
 func (s *Session) Push(item models.Item) error {
@@ -234,18 +272,36 @@ func (s *Session) Push(item models.Item) error {
 		return err
 	}
 
-	for _, sess := range s.clients {
-		if writeErr := sess.Write(event); writeErr != nil {
-			log.Println(writeErr)
-		}
-	}
+	s.writeToClients(event)
 
 	return nil
 }
 
-func (s *Session) Stop() {
+func (s *Session) Close() {
+	// Unsubscribe emitter listeners
+	s.emitter.Off("*")
+	// Signal goroutines to stop
+	close(s.stop)
 
-	//s.Inactive <- true
+	s.waiter.Wait()
+
+	if s.CurrentPlayer != nil {
+		s.CurrentPlayer.Pause()
+	}
+
+	for _, player := range s.players {
+		player.Stop()
+	}
+
+	event, _ := json.Marshal(gin.H{
+		"type": "party.close",
+	})
+
+	for _, client := range s.clients {
+		if writeErr := client.CloseWithMsg(event); writeErr != nil {
+			log.Println(writeErr)
+		}
+	}
 }
 
 func (s *Session) Pause() (error) {
@@ -394,11 +450,7 @@ func (s *Session) AttendeesChanged() error {
 		return err
 	}
 
-	for _, sess := range s.clients {
-		if writeErr := sess.Write(event); writeErr != nil {
-			log.Println(writeErr)
-		}
-	}
+	s.writeToClients(event)
 
 	return nil
 }

@@ -65,7 +65,7 @@ func (c *PartyController) Create(context *gin.Context, cli *cli.Context) {
 	user_id := bson.ObjectIdHex(context.MustGet("userID").(string))
 
 	if context.BindJSON(&data) == nil {
-		party_record := models.NewParty(user_id, data.Name, data.JoinCode)
+		party_record := models.NewParty(user_id, data.Name, data.JoinCode, data.Settings)
 
 		err := party_record.Insert(db)
 
@@ -248,12 +248,12 @@ func (c *PartyController) Leave(context *gin.Context) {
 	session, db := c.Mongo.DB()
 	defer session.Close()
 
-	party_session, ok := c.party_sessions[party_id]
+	party_session, session_exists := c.party_sessions[party_id]
 
 	var party_record *models.Party
 	var err error
 
-	if ok {
+	if session_exists {
 		party_record = party_session.GetParty()
 	} else {
 		party_record, err = models.PartyByID(db, bson.ObjectIdHex(party_id))
@@ -277,13 +277,30 @@ func (c *PartyController) Leave(context *gin.Context) {
 
 		if len(party_record.Attendees) == 0 {
 			// Cleanup the party if it's empty
-			if ok {
-				party_session.Stop()
+
+			if err := party_record.Remove(db); err != nil {
+				context.AbortWithError(500, err)
+				return
+			}
+
+			if session_exists {
+				party_session.Close()
 				delete(c.party_sessions, party_record.ID.Hex())
 			}
 
+			context.JSON(200, bson.M{})
+			return
+		} else if _, ok := context.GetQuery("end_party"); ok {
+			// Cleanup the party and notify the guests of close
+
 			if err := party_record.Remove(db); err != nil {
-				log.Println(err)
+				context.AbortWithError(500, err)
+				return
+			}
+
+			if session_exists {
+				party_session.Close()
+				delete(c.party_sessions, party_record.ID.Hex())
 			}
 
 			context.JSON(200, bson.M{})
@@ -293,13 +310,14 @@ func (c *PartyController) Leave(context *gin.Context) {
 
 			if err := party_record.TransferHost(db, transfer_to); err != nil {
 				context.AbortWithError(500, err)
+				return
 			}
 
 			if err := party_record.WithHost(db); err != nil {
 				context.AbortWithError(500, err)
 			}
 
-			if ok {
+			if session_exists {
 				if err := party_session.AttendeesChanged(); err != nil {
 					context.AbortWithError(500, err)
 				}
@@ -345,7 +363,7 @@ func (c *PartyController) Leave(context *gin.Context) {
 			return
 		}
 
-		if ok {
+		if session_exists {
 			if err := party_session.AttendeesChanged(); err != nil {
 				context.AbortWithError(500, err)
 			}

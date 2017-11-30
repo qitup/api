@@ -12,6 +12,7 @@ type Player interface {
 	Next() (error)
 	Previous() (error)
 	HasItems() (bool)
+	Stop()
 }
 
 type EventType int

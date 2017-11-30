@@ -42,8 +42,7 @@ type SpotifyPlayer struct {
 	playback_state *spotify.PlayerState
 	device_id      *string
 	current_items  []models.Item
-
-	// Send true to this channel when a party becomes inactive
+	// Close this channel when a party becomes inactive
 	stop   chan bool
 	ticker *time.Ticker
 }
@@ -57,6 +56,10 @@ func New(emitter *emitter.Emitter, token *oauth2.Token, device_id *string) (*Spo
 		device_id:      device_id,
 		stop:           make(chan bool),
 	}, nil
+}
+
+func (p *SpotifyPlayer) Stop() {
+	p.stopPolling()
 }
 
 func (p *SpotifyPlayer) Play(items []models.Item) (error) {
@@ -134,7 +137,7 @@ func (p *SpotifyPlayer) stopPolling() {
 	if p.ticker != nil {
 		// Stop delivering ticks
 		p.ticker.Stop()
-		p.stop <- true
+		close(p.stop)
 		p.ticker = nil
 	}
 }
@@ -166,11 +169,8 @@ func (p *SpotifyPlayer) poll() {
 
 			break
 
-		case done := <-p.stop:
-			if done {
-				return
-			}
-			break
+		case <-p.stop:
+			return
 		}
 	}
 }

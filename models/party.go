@@ -30,7 +30,7 @@ type Attendee struct {
 	JoinedAt time.Time     `json:"joined_at" bson:"joined_at"`
 }
 
-func NewParty(host_id bson.ObjectId, name, join_code string) (Party) {
+func NewParty(host_id bson.ObjectId, name, join_code string, settings Settings) (Party) {
 	return Party{
 		ID:        bson.NewObjectId(),
 		HostID:    host_id,
@@ -38,6 +38,7 @@ func NewParty(host_id bson.ObjectId, name, join_code string) (Party) {
 		Name:      name,
 		JoinCode:  join_code,
 		CreatedAt: time.Now(),
+		Settings:  settings,
 	}
 }
 
