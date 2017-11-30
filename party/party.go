@@ -93,6 +93,8 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 
 					if ev.Bool(0) {
 						session.setupTimeout()
+					} else {
+						session.PlayHead()
 					}
 
 					if session.CurrentPlayer != nil && !session.CurrentPlayer.HasItems() {
