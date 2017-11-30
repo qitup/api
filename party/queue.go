@@ -7,13 +7,8 @@ import (
 	"dubclan/api/models"
 )
 
-type State struct {
-	cursor      int
-	currentItem *models.Item
-}
 type Queue struct {
 	Items []models.Item `json:"items" bson:"items"`
-	State State
 }
 
 func NewQueue() *Queue {
@@ -76,6 +71,8 @@ func (q *Queue) Push(conn redis.Conn, id string, item models.Item) error {
 
 func (q *Queue) Pop(conn redis.Conn, id string) (models.Item, error) {
 	if raw, err := redis.String(conn.Do("RPOP", QUEUE_PREFIX+id)); err == nil {
+		_, q.Items = q.Items[0], q.Items[:1]
+
 		u := &models.ItemUnpacker{}
 		if err := json.Unmarshal([]byte(raw), u); err == nil {
 			return u.Result, nil
@@ -84,5 +81,15 @@ func (q *Queue) Pop(conn redis.Conn, id string) (models.Item, error) {
 		}
 	} else {
 		return nil, err
+	}
+}
+
+func (q *Queue) UpdateHead(conn redis.Conn, id string) error {
+	if serialized, err := json.Marshal(q.Items[0]); err == nil {
+		_, err := conn.Do("LSET", QUEUE_PREFIX+id, -1, serialized)
+
+		return err
+	} else {
+		return err
 	}
 }

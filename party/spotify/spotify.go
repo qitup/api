@@ -60,6 +60,10 @@ func New(emitter *emitter.Emitter, token *oauth2.Token, device_id *string) (*Spo
 }
 
 func (p *SpotifyPlayer) Play(items []models.Item) (error) {
+	if items == nil && len(p.current_items) > 0 {
+		items = p.current_items
+	}
+
 	uris := []spotify.URI{}
 	for _, item := range items {
 		switch item.(type) {
@@ -69,8 +73,6 @@ func (p *SpotifyPlayer) Play(items []models.Item) (error) {
 			break
 		}
 	}
-
-	log.Println(uris)
 
 	opt := spotify.PlayOptions{
 		URIs: uris,
@@ -122,7 +124,7 @@ func (p *SpotifyPlayer) Previous() (error) {
 }
 
 func (p *SpotifyPlayer) HasItems() (bool) {
-	return p.current_items != nil
+	return len(p.current_items) > 0
 }
 
 func (p *SpotifyPlayer) stopPolling() {
@@ -170,6 +172,22 @@ func (p *SpotifyPlayer) poll() {
 	}
 }
 
+func (p *SpotifyPlayer) current() spotify.URI {
+	if len(p.current_items) < 1 {
+		return ""
+	}
+
+	item := p.current_items[0]
+	switch item.(type) {
+	case *models.SpotifyTrack:
+		track := item.(*models.SpotifyTrack)
+		return track.URI
+		break
+	}
+
+	return ""
+}
+
 func (p *SpotifyPlayer) peekNext() spotify.URI {
 	if len(p.current_items) <= 1 {
 		return ""
@@ -187,29 +205,45 @@ func (p *SpotifyPlayer) peekNext() spotify.URI {
 }
 
 func (p *SpotifyPlayer) UpdateState(new_state *spotify.PlayerState) (error) {
-	log.Println("PREV:", p.playback_state)
-	log.Println("NEW:", new_state)
-
 	if p.playback_state == nil {
 		if new_state.Playing {
-			// Playback started
-			p.emitter.Emit("player.play")
+			if new_state.Item.URI == p.current() {
+				// Playback started
+				p.emitter.Emit("player.play")
+			} else {
+				p.emitter.Emit("player.interrupted")
+			}
+		}
+	} else if p.playback_state.Playing && !new_state.Playing {
+		if p.playback_state.Item.ID == new_state.Item.ID {
+			if new_state.Progress == 0 {
+				var prev models.Item
+				prev, p.current_items = p.current_items[0], p.current_items[:1]
+				prev.Done()
+				p.emitter.Emit("player.track_finished", true)
+			} else {
+				p.emitter.Emit("player.paused")
+			}
+		} else {
+			p.emitter.Emit("player.interrupted")
 		}
 	} else if p.playback_state.Item.ID != new_state.Item.ID {
-		log.Println("PREV URI:", p.playback_state.Item.URI)
-		log.Println("NEW URI:", new_state.Item.URI)
-		log.Println("NEXT TRACK:", p.peekNext())
-
 		if !p.HasItems() {
 			// playback of something else has been started somewhere
 			p.emitter.Emit("player.interrupted")
+		} else if p.current() == new_state.Item.URI {
+			p.emitter.Emit("player.play")
 		} else if p.peekNext() == new_state.Item.URI {
+			var prev models.Item
 			// Track changed to next item
-			_, p.current_items = p.current_items[0], p.current_items[:1]
-			p.emitter.Emit("player.track_finished")
+			prev, p.current_items = p.current_items[0], p.current_items[:1]
+			prev.Done()
+			p.emitter.Emit("player.track_finished", false)
 		} else if len(p.current_items) == 1 && p.playback_state.Playing && !new_state.Playing {
-			_, p.current_items = p.current_items[0], p.current_items[:1]
-			p.emitter.Emit("player.done")
+			var prev models.Item
+			prev, p.current_items = p.current_items[0], p.current_items[:1]
+			prev.Done()
+			p.emitter.Emit("player.track_finished", true)
 		} else {
 			// playback has been started somewhere else
 			p.emitter.Emit("player.interrupted")
@@ -220,7 +254,7 @@ func (p *SpotifyPlayer) UpdateState(new_state *spotify.PlayerState) (error) {
 			// Playback started
 			p.emitter.Emit("player.play")
 		} else if p.playback_state.Playing && !new_state.Playing {
-			p.emitter.Emit("player.paused")
+			p.emitter.Emit("player.play")
 		}
 	}
 

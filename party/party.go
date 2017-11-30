@@ -22,9 +22,20 @@ const (
 	JOIN_CODE_PREFIX = "join_code:"
 )
 
-var EmptyQueue = errors.New("empty queue")
+var (
+	EmptyQueue = errors.New("empty queue")
 
-var ConnectTokenIssued = errors.New("connect token is issued for this user")
+	Interrupted = errors.New("playback interrupted")
+
+	ConnectTokenIssued = errors.New("connect token is issued for this user")
+)
+
+const (
+	READY       = iota
+	PLAYING
+	PAUSED
+	INTERRUPTED
+)
 
 type Session struct {
 	mongo         *store.MongoStore
@@ -36,6 +47,7 @@ type Session struct {
 	CurrentPlayer Player
 	emitter       *emitter.Emitter
 	timeout       <-chan time.Time
+	state         int
 }
 
 func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redis_store *store.RedisStore) (*Session) {
@@ -47,6 +59,7 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 		queue:   queue,
 		players: make(map[string]Player),
 		emitter: emitter.New(10),
+		state:   READY,
 	}
 
 	go (func() {
@@ -65,38 +78,49 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 				}
 
 				_, err = session.queue.Pop(conn, session.party.ID.Hex())
+				conn.Close()
 
 				if session.CurrentPlayer != nil && !session.CurrentPlayer.HasItems() {
 					session.Play()
 				}
 
-				event, _ := json.Marshal(map[string]interface{}{
-					"type": "player.change",
+				event, err := json.Marshal(gin.H{
+					"queue": session.queue,
+					"type":  "queue.change",
 				})
 
-				for _, sess := range session.clients {
-					if writeErr := sess.Write(event); writeErr != nil {
+				for _, client := range session.clients {
+					if writeErr := client.Write(event); writeErr != nil {
 						log.Println(writeErr)
 					}
 				}
 				break
 			case <-play:
-				log.Println("PLAY")
+				if session.queue.Items[0].Play() {
+					session.state = PLAYING
+					log.Println("PLAY")
 
-				session.queue.Items[0].Play()
+					conn, err := redis_store.GetConnection()
 
-				event, _ := json.Marshal(map[string]interface{}{
-					"type": "player.play",
-				})
+					if err != nil {
+						panic(err)
+					}
+					session.queue.UpdateHead(conn, session.party.ID.Hex())
+					conn.Close()
 
-				for _, sess := range session.clients {
-					if writeErr := sess.Write(event); writeErr != nil {
-						log.Println(writeErr)
+					event, _ := json.Marshal(map[string]interface{}{
+						"type": "player.play",
+					})
+
+					for _, sess := range session.clients {
+						if writeErr := sess.Write(event); writeErr != nil {
+							log.Println(writeErr)
+						}
 					}
 				}
-
 				break
 			case <-interrupt:
+				session.state = INTERRUPTED
 				log.Println("INTERRUPT")
 				event, _ := json.Marshal(map[string]interface{}{
 					"type": "player.interrupted",
@@ -110,14 +134,25 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 
 				break
 			case <-pause:
-				log.Println("PAUSE")
-				event, _ := json.Marshal(map[string]interface{}{
-					"type": "player.pause",
-				})
+				session.state = PAUSED
+				if session.queue.Items[0].Pause() {
+					conn, err := redis_store.GetConnection()
 
-				for _, sess := range session.clients {
-					if writeErr := sess.Write(event); writeErr != nil {
-						log.Println(writeErr)
+					if err != nil {
+						panic(err)
+					}
+					session.queue.UpdateHead(conn, session.party.ID.Hex())
+					conn.Close()
+
+					log.Println("PAUSE")
+					event, _ := json.Marshal(map[string]interface{}{
+						"type": "player.pause",
+					})
+
+					for _, sess := range session.clients {
+						if writeErr := sess.Write(event); writeErr != nil {
+							log.Println(writeErr)
+						}
 					}
 				}
 
@@ -214,33 +249,42 @@ func (s *Session) Stop() {
 }
 
 func (s *Session) Pause() (error) {
-	if s.CurrentPlayer != nil && s.CurrentPlayer.HasItems() {
-		return s.CurrentPlayer.Pause()
+	if s.state == INTERRUPTED {
+		return Interrupted
+	} else if s.CurrentPlayer != nil && s.CurrentPlayer.HasItems() {
+		if err := s.CurrentPlayer.Pause(); err != nil {
+			return err
+		} else {
+			s.state = PAUSED
+		}
+	} else {
+		return EmptyQueue
 	}
 
 	return nil
 }
 
 func (s *Session) Next() (error) {
-	if s.CurrentPlayer != nil {
-		if !s.CurrentPlayer.HasItems() {
-			items := s.queue.GetNextPlayableList()
-			if len(items) > 0 {
-				player, err := s.GetPlayerForItem(items[0])
-				if err != nil {
-					return err
-				} else if player != s.CurrentPlayer {
-					s.CurrentPlayer = player
-				}
-
-				return s.CurrentPlayer.Play(items)
-			} else {
-				s.CurrentPlayer = nil
-			}
-		} else {
-			return s.CurrentPlayer.Next()
-		}
-	}
+	//if s.CurrentPlayer != nil {
+	//	if !s.CurrentPlayer.HasItems() {
+	//		items := s.queue.GetNextPlayableList()
+	//		if len(items) > 0 {
+	//			player, err := s.GetPlayerForItem(items[0])
+	//			if err != nil {
+	//				return err
+	//			} else if player != s.CurrentPlayer {
+	//				s.CurrentPlayer = player
+	//			}
+	//
+	//			return s.CurrentPlayer.Play(items)
+	//		} else {
+	//			s.CurrentPlayer = nil
+	//		}
+	//	} else {
+	//		return s.CurrentPlayer.Next()
+	//	}
+	//}
+	panic("NOT IMPLEMENTED")
 
 	return nil
 }
@@ -257,13 +301,31 @@ func (s *Session) Play() (error) {
 					s.CurrentPlayer = player
 				}
 
-				return s.CurrentPlayer.Play(items)
+				log.Println(items)
+				if err := s.CurrentPlayer.Play(items); err != nil {
+					return err
+				} else {
+					s.state = PLAYING
+				}
 			} else {
 				s.CurrentPlayer = nil
 				return EmptyQueue
 			}
 		} else {
-			return s.CurrentPlayer.Resume()
+			switch s.state {
+			case INTERRUPTED:
+				log.Println("RESUMING AFTER INTERRUPTION")
+				if err := s.CurrentPlayer.Play(nil); err != nil {
+					return err
+				}
+				s.state = PLAYING
+				break
+			case PAUSED:
+				if err := s.CurrentPlayer.Resume(); err != nil {
+					return err
+				}
+				s.state = PLAYING
+			}
 		}
 	} else {
 		items := s.queue.GetNextPlayableList()
@@ -277,9 +339,6 @@ func (s *Session) Play() (error) {
 
 			if err := player.Play(items); err != nil {
 				return err
-			} else {
-				s.queue.State.currentItem = &items[0]
-				s.queue.State.cursor = 0
 			}
 		} else {
 			return EmptyQueue
