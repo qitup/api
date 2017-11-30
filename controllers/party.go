@@ -501,6 +501,7 @@ func (c *PartyController) PushHTTP(context *gin.Context) {
 		if err := session.Push(item); err != nil {
 			context.AbortWithError(500, err)
 		}
+		context.JSON(200, gin.H{})
 	} else {
 		context.AbortWithError(500, errors.New("No party session exists for (%s), something's fucky"+party_id))
 	}
