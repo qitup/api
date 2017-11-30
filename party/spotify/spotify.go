@@ -86,6 +86,7 @@ func (p *SpotifyPlayer) Play(items []models.Item) (error) {
 	if err := p.client.PlayOpt(&opt); err != nil {
 		return err
 	}
+	p.emitter.Emit("player.play")
 
 	p.current_items = items
 	p.startPolling(POLL_INTERVAL)
@@ -97,6 +98,7 @@ func (p *SpotifyPlayer) Resume() (error) {
 	if err := p.client.Play(); err != nil {
 		return err
 	}
+	p.emitter.Emit("player.play")
 
 	p.startPolling(POLL_INTERVAL)
 	return nil
@@ -106,6 +108,7 @@ func (p *SpotifyPlayer) Pause() (error) {
 	if err := p.client.Pause(); err != nil {
 		return err
 	}
+	p.emitter.Emit("player.pause")
 
 	p.stopPolling()
 	return nil
