@@ -80,6 +80,10 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 				_, err = session.queue.Pop(conn, session.party.ID.Hex())
 				conn.Close()
 
+				if session.CurrentPlayer != nil && !session.CurrentPlayer.HasItems() {
+					session.Play()
+				}
+
 				event, err := json.Marshal(gin.H{
 					"queue": session.queue,
 					"type":  "queue.change",
@@ -107,49 +111,50 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 				break
 
 			case <-play:
-				session.queue.Items[0].Play()
-				session.state = PLAYING
-				log.Println("PLAY")
+				if session.queue.Items[0].Play() {
+					session.state = PLAYING
+					log.Println("PLAY")
 
-				conn, err := redis_store.GetConnection()
+					conn, err := redis_store.GetConnection()
 
-				if err != nil {
-					panic(err)
-				}
-				session.queue.UpdateHead(conn, session.party.ID.Hex())
-				conn.Close()
+					if err != nil {
+						panic(err)
+					}
+					session.queue.UpdateHead(conn, session.party.ID.Hex())
+					conn.Close()
 
-				event, _ := json.Marshal(map[string]interface{}{
-					"type": "player.play",
-				})
+					event, _ := json.Marshal(map[string]interface{}{
+						"type": "player.play",
+					})
 
-				for _, sess := range session.clients {
-					if writeErr := sess.Write(event); writeErr != nil {
-						log.Println(writeErr)
+					for _, sess := range session.clients {
+						if writeErr := sess.Write(event); writeErr != nil {
+							log.Println(writeErr)
+						}
 					}
 				}
-
 				break
 			case <-pause:
-				session.queue.Items[0].Pause()
-				session.state = PAUSED
-				log.Println("PAUSE")
+				if session.queue.Items[0].Pause() {
+					session.state = PAUSED
+					log.Println("PAUSED")
 
-				conn, err := redis_store.GetConnection()
+					conn, err := redis_store.GetConnection()
 
-				if err != nil {
-					panic(err)
-				}
-				session.queue.UpdateHead(conn, session.party.ID.Hex())
-				conn.Close()
+					if err != nil {
+						panic(err)
+					}
+					session.queue.UpdateHead(conn, session.party.ID.Hex())
+					conn.Close()
 
-				event, _ := json.Marshal(map[string]interface{}{
-					"type": "player.pause",
-				})
+					event, _ := json.Marshal(map[string]interface{}{
+						"type": "player.pause",
+					})
 
-				for _, sess := range session.clients {
-					if writeErr := sess.Write(event); writeErr != nil {
-						log.Println(writeErr)
+					for _, sess := range session.clients {
+						if writeErr := sess.Write(event); writeErr != nil {
+							log.Println(writeErr)
+						}
 					}
 				}
 

@@ -221,7 +221,7 @@ func (p *SpotifyPlayer) UpdateState(new_state *spotify.PlayerState) (error) {
 		if p.playback_state.Item.ID == new_state.Item.ID {
 			if new_state.Progress == 0 {
 				var prev models.Item
-				prev, p.current_items = p.current_items[0], p.current_items[:1]
+				prev, p.current_items = p.current_items[0], p.current_items[1:]
 				prev.Done()
 				p.emitter.Emit("player.track_finished", true)
 			} else {
@@ -239,12 +239,12 @@ func (p *SpotifyPlayer) UpdateState(new_state *spotify.PlayerState) (error) {
 		} else if p.peekNext() == new_state.Item.URI {
 			var prev models.Item
 			// Track changed to next item
-			prev, p.current_items = p.current_items[0], p.current_items[:1]
+			prev, p.current_items = p.current_items[0], p.current_items[1:]
 			prev.Done()
 			p.emitter.Emit("player.track_finished", false)
 		} else if len(p.current_items) == 1 && p.playback_state.Playing && !new_state.Playing {
 			var prev models.Item
-			prev, p.current_items = p.current_items[0], p.current_items[:1]
+			prev, p.current_items = p.current_items[0], p.current_items[1:]
 			prev.Done()
 			p.emitter.Emit("player.track_finished", true)
 		} else {
