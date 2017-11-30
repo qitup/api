@@ -154,7 +154,11 @@ func (p *SpotifyPlayer) poll() {
 	for {
 		select {
 		// Update states of our players
-		case <-p.ticker.C:
+		case _, ok := <-p.ticker.C:
+			if !ok {
+				return
+			}
+
 			state, err := p.client.PlayerState()
 
 			if err != nil {

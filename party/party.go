@@ -92,13 +92,11 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 					conn.Close()
 
 					if ev.Bool(0) {
-						session.setupTimeout()
-					} else {
 						session.PlayHead()
 					}
 
-					if session.CurrentPlayer != nil && !session.CurrentPlayer.HasItems() {
-						session.Play()
+					if session.Play() != nil {
+						session.setupTimeout()
 					}
 
 					event, err := json.Marshal(gin.H{
