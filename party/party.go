@@ -125,7 +125,7 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 				}
 				break
 
-			case _, ok := <-play:
+			case ev, ok := <-play:
 				if ok && len(session.queue.Items) > 0 {
 					session.queue.Items[0].Play()
 					session.state = PLAYING
@@ -139,9 +139,17 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 					session.queue.UpdateHead(conn, session.party.ID.Hex())
 					conn.Close()
 
-					event, _ := json.Marshal(map[string]interface{}{
-						"type": "player.play",
-					})
+					var event []byte
+					if ev.Bool(0) {
+						event, _ = json.Marshal(map[string]interface{}{
+							"type":  "player.play",
+							"queue": session.queue,
+						})
+					} else {
+						event, _ = json.Marshal(map[string]interface{}{
+							"type":  "player.resume",
+						})
+					}
 
 					session.writeToClients(event)
 				}
