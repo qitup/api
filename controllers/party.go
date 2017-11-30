@@ -28,6 +28,12 @@ func NewPartyController(mongo *store.MongoStore, redis *store.RedisStore) PartyC
 	}
 }
 
+func (c *PartyController) OnSessionClose(id string) {
+	if _, ok := c.party_sessions[id]; ok {
+		delete(c.party_sessions, id)
+	}
+}
+
 func (c *PartyController) Get(context *gin.Context) {
 	session, db := c.Mongo.DB()
 	defer session.Close()
@@ -93,7 +99,7 @@ func (c *PartyController) Create(context *gin.Context, cli *cli.Context) {
 		defer conn.Close()
 
 		queue := party.NewQueue()
-		session := party.NewSession(&party_record, queue, c.Mongo, c.Redis)
+		session := party.NewSession(&party_record, queue, c.Mongo, c.Redis, c.OnSessionClose)
 
 		c.party_sessions[party_record.ID.Hex()] = session
 
@@ -173,12 +179,12 @@ func (c *PartyController) Join(context *gin.Context, cli *cli.Context) {
 	if ok {
 		party_record = party_session.GetParty()
 	} else if queue, err := party.ResumeQueue(conn, party_record.ID.Hex()); err == nil {
-		party_session = party.NewSession(party_record, queue, c.Mongo, c.Redis)
+		party_session = party.NewSession(party_record, queue, c.Mongo, c.Redis, c.OnSessionClose)
 
 		c.party_sessions[party_record.ID.Hex()] = party_session
 	} else if err == redis.ErrNil {
 		queue = party.NewQueue()
-		party_session = party.NewSession(party_record, queue, c.Mongo, c.Redis)
+		party_session = party.NewSession(party_record, queue, c.Mongo, c.Redis, c.OnSessionClose)
 
 		c.party_sessions[party_record.ID.Hex()] = party_session
 	} else {
@@ -278,14 +284,11 @@ func (c *PartyController) Leave(context *gin.Context) {
 		if len(party_record.Attendees) == 0 {
 			// Cleanup the party if it's empty
 
-			if err := party_record.Remove(db); err != nil {
-				context.AbortWithError(500, err)
-				return
-			}
-
 			if session_exists {
 				party_session.Close()
-				delete(c.party_sessions, party_record.ID.Hex())
+			} else if err := party_record.Remove(db); err != nil {
+				context.AbortWithError(500, err)
+				return
 			}
 
 			context.JSON(200, bson.M{})
@@ -293,14 +296,11 @@ func (c *PartyController) Leave(context *gin.Context) {
 		} else if _, ok := context.GetQuery("end_party"); ok {
 			// Cleanup the party and notify the guests of close
 
-			if err := party_record.Remove(db); err != nil {
-				context.AbortWithError(500, err)
-				return
-			}
-
 			if session_exists {
 				party_session.Close()
-				delete(c.party_sessions, party_record.ID.Hex())
+			} else if err := party_record.Remove(db); err != nil {
+				context.AbortWithError(500, err)
+				return
 			}
 
 			context.JSON(200, bson.M{})

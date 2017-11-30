@@ -93,3 +93,9 @@ func (q *Queue) UpdateHead(conn redis.Conn, id string) error {
 		return err
 	}
 }
+
+func (q *Queue) Delete(conn redis.Conn, id string) error {
+	_, err := conn.Do("DEL", QUEUE_PREFIX+id)
+
+	return err
+}

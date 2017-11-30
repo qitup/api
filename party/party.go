@@ -47,24 +47,26 @@ type Session struct {
 	players       map[string]Player
 	CurrentPlayer Player
 	emitter       *emitter.Emitter
-	timeout       <-chan time.Time
+	timeout       *time.Timer
 	state         int
 
-	stop   chan bool
-	waiter sync.WaitGroup
+	stop     chan bool
+	waiter   sync.WaitGroup
+	on_close func(id string)
 }
 
-func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redis_store *store.RedisStore) (*Session) {
+func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redis_store *store.RedisStore, on_close func(id string)) (*Session) {
 	session := &Session{
-		mongo:   mongo,
-		redis:   redis_store,
-		party:   party,
-		clients: make(map[string]*melody.Session),
-		queue:   queue,
-		players: make(map[string]Player),
-		emitter: emitter.New(10),
-		state:   READY,
-		stop:    make(chan bool),
+		mongo:    mongo,
+		redis:    redis_store,
+		party:    party,
+		clients:  make(map[string]*melody.Session),
+		queue:    queue,
+		players:  make(map[string]Player),
+		emitter:  emitter.New(10),
+		state:    READY,
+		stop:     make(chan bool),
+		on_close: on_close,
 	}
 
 	session.setupTimeout()
@@ -77,7 +79,7 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 		pause := session.emitter.On("player.pause")
 		for {
 			select {
-			case _, ok := <-change:
+			case ev, ok := <-change:
 				if ok {
 					log.Println("CHANGE")
 					conn, err := redis_store.GetConnection()
@@ -88,7 +90,9 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 
 					_, err = session.queue.Pop(conn, session.party.ID.Hex())
 
-					if session.CurrentPlayer.HasItems() {
+					if ev.Bool(0) {
+						session.setupTimeout()
+					} else {
 						session.queue.Items[0].Play()
 						err = session.queue.UpdateHead(conn, session.party.ID.Hex())
 					}
@@ -110,6 +114,8 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 			case _, ok := <-interrupt:
 				if ok {
 					session.state = INTERRUPTED
+					session.setupTimeout()
+
 					log.Println("INTERRUPT")
 					event, _ := json.Marshal(map[string]interface{}{
 						"type": "player.interrupted",
@@ -187,32 +193,19 @@ func (s *Session) writeToClients(msg []byte) {
 
 func (s *Session) setupTimeout() {
 	if s.timeout == nil {
-		s.timeout = time.After(time.Minute * s.party.Settings.Timeout)
-		s.waiter.Add(1)
-
-		go (func(timeout <-chan time.Time, stop <-chan bool) {
-			for {
-				select {
-				case _, ok := <-timeout:
-					if ok {
-						log.Println("PARTY TIMEOUT")
-					} else {
-						log.Println("TIMEOUT CLEARED")
-					}
-					s.waiter.Done()
-					return
-				case <-stop:
-					s.waiter.Done()
-					return
-				}
-			}
-		})(s.timeout, s.stop)
+		s.timeout = time.AfterFunc(time.Second*s.party.Settings.Timeout, func() {
+			log.Println("Party timedout")
+			s.Close()
+		})
+		log.Println("Setup timeout")
 	}
 }
 
 func (s *Session) clearTimeout() {
 	if s.timeout != nil {
-		//close(s.timeout)
+		s.timeout.Stop()
+		s.timeout = nil
+		log.Println("Cleared timeout")
 	}
 }
 
@@ -293,6 +286,16 @@ func (s *Session) Close() {
 		player.Stop()
 	}
 
+	conn, err := s.redis.GetConnection()
+	if err == nil {
+		s.queue.Delete(conn, s.party.ID.Hex())
+		conn.Close()
+	}
+
+	session, db := s.mongo.DB()
+	s.party.Remove(db)
+	session.Close()
+
 	event, _ := json.Marshal(gin.H{
 		"type": "party.close",
 	})
@@ -304,6 +307,8 @@ func (s *Session) Close() {
 
 		client.Close()
 	}
+
+	s.on_close(s.party.ID.Hex())
 }
 
 func (s *Session) Pause() (error) {
@@ -313,6 +318,7 @@ func (s *Session) Pause() (error) {
 		if err := s.CurrentPlayer.Pause(); err != nil {
 			return err
 		} else {
+			s.setupTimeout()
 			s.state = PAUSED
 		}
 	} else {
@@ -359,7 +365,6 @@ func (s *Session) Play() (error) {
 					s.CurrentPlayer = player
 				}
 
-				log.Println(items)
 				if err := s.CurrentPlayer.Play(items); err != nil {
 					return err
 				} else {
@@ -402,6 +407,7 @@ func (s *Session) Play() (error) {
 			return EmptyQueue
 		}
 	}
+	s.clearTimeout()
 
 	return nil
 }
