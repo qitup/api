@@ -54,7 +54,6 @@ func New(emitter *emitter.Emitter, token *oauth2.Token, device_id *string) (*Spo
 		client:         authenticator.NewClient(token),
 		playback_state: nil,
 		device_id:      device_id,
-		stop:           make(chan bool),
 	}, nil
 }
 
@@ -144,6 +143,7 @@ func (p *SpotifyPlayer) stopPolling() {
 
 func (p *SpotifyPlayer) startPolling(interval time.Duration) {
 	if p.ticker == nil {
+		p.stop = make(chan bool)
 		p.ticker = time.NewTicker(interval)
 		go p.poll()
 	}
@@ -228,7 +228,14 @@ func (p *SpotifyPlayer) UpdateState(new_state *spotify.PlayerState) (error) {
 				p.emitter.Emit("player.paused")
 			}
 		} else {
-			p.emitter.Emit("player.interrupted")
+			if new_state.Progress == 0 {
+				var prev models.Item
+				prev, p.current_items = p.current_items[0], p.current_items[1:]
+				prev.Done()
+				p.emitter.Emit("player.track_finished", true)
+			} else {
+				p.emitter.Emit("player.interrupted")
+			}
 		}
 	} else if p.playback_state.Item.ID != new_state.Item.ID {
 		if !p.HasItems() {
