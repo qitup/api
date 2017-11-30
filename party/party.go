@@ -298,9 +298,11 @@ func (s *Session) Close() {
 	})
 
 	for _, client := range s.clients {
-		if writeErr := client.CloseWithMsg(event); writeErr != nil {
+		if writeErr := client.Write(event); writeErr != nil {
 			log.Println(writeErr)
 		}
+
+		client.Close()
 	}
 }
 
