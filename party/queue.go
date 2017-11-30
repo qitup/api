@@ -71,7 +71,7 @@ func (q *Queue) Push(conn redis.Conn, id string, item models.Item) error {
 
 func (q *Queue) Pop(conn redis.Conn, id string) (models.Item, error) {
 	if raw, err := redis.String(conn.Do("RPOP", QUEUE_PREFIX+id)); err == nil {
-		_, q.Items = q.Items[0], q.Items[:1]
+		_, q.Items = q.Items[0], q.Items[1:]
 
 		u := &models.ItemUnpacker{}
 		if err := json.Unmarshal([]byte(raw), u); err == nil {

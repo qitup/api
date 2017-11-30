@@ -96,6 +96,7 @@ func (p *SpotifyPlayer) Resume() (error) {
 	if err := p.client.Play(); err != nil {
 		return err
 	}
+	p.emitter.Emit("player.play")
 
 	p.startPolling(POLL_INTERVAL)
 	return nil
@@ -105,18 +106,20 @@ func (p *SpotifyPlayer) Pause() (error) {
 	if err := p.client.Pause(); err != nil {
 		return err
 	}
+	p.emitter.Emit("player.pause")
 
 	p.stopPolling()
 	return nil
 }
 
 func (p *SpotifyPlayer) Next() (error) {
-	if err := p.client.Next(); err != nil {
-		return err
-	}
-
-	p.startPolling(POLL_INTERVAL)
-	return nil
+	//if err := p.client.Next(); err != nil {
+	//	return err
+	//}
+	//
+	//p.startPolling(POLL_INTERVAL)
+	//return nil
+	panic("NOT IMPLEMENTED")
 }
 
 func (p *SpotifyPlayer) Previous() (error) {

@@ -80,10 +80,6 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 				_, err = session.queue.Pop(conn, session.party.ID.Hex())
 				conn.Close()
 
-				if session.CurrentPlayer != nil && !session.CurrentPlayer.HasItems() {
-					session.Play()
-				}
-
 				event, err := json.Marshal(gin.H{
 					"queue": session.queue,
 					"type":  "queue.change",
@@ -95,6 +91,21 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 					}
 				}
 				break
+			case <-interrupt:
+				session.state = INTERRUPTED
+				log.Println("INTERRUPT")
+				event, _ := json.Marshal(map[string]interface{}{
+					"type": "player.interrupted",
+				})
+
+				for _, sess := range session.clients {
+					if writeErr := sess.Write(event); writeErr != nil {
+						log.Println(writeErr)
+					}
+				}
+
+				break
+
 			case <-play:
 				if session.queue.Items[0].Play() {
 					session.state = PLAYING
@@ -119,23 +130,11 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 					}
 				}
 				break
-			case <-interrupt:
-				session.state = INTERRUPTED
-				log.Println("INTERRUPT")
-				event, _ := json.Marshal(map[string]interface{}{
-					"type": "player.interrupted",
-				})
-
-				for _, sess := range session.clients {
-					if writeErr := sess.Write(event); writeErr != nil {
-						log.Println(writeErr)
-					}
-				}
-
-				break
 			case <-pause:
-				session.state = PAUSED
 				if session.queue.Items[0].Pause() {
+					session.state = PAUSED
+					log.Println("PAUSE")
+
 					conn, err := redis_store.GetConnection()
 
 					if err != nil {
@@ -144,7 +143,6 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 					session.queue.UpdateHead(conn, session.party.ID.Hex())
 					conn.Close()
 
-					log.Println("PAUSE")
 					event, _ := json.Marshal(map[string]interface{}{
 						"type": "player.pause",
 					})
