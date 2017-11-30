@@ -89,15 +89,11 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 					}
 
 					_, err = session.queue.Pop(conn, session.party.ID.Hex())
+					conn.Close()
 
 					if ev.Bool(0) {
 						session.setupTimeout()
-					} else {
-						session.queue.Items[0].Play()
-						err = session.queue.UpdateHead(conn, session.party.ID.Hex())
 					}
-
-					conn.Close()
 
 					if session.CurrentPlayer != nil && !session.CurrentPlayer.HasItems() {
 						session.Play()
@@ -125,31 +121,17 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 				}
 				break
 
-			case ev, ok := <-play:
+			case _, ok := <-play:
 				if ok && len(session.queue.Items) > 0 {
 					session.queue.Items[0].Play()
 					session.state = PLAYING
 					log.Println("PLAY")
 
-					conn, err := redis_store.GetConnection()
+					session.PlayHead()
 
-					if err != nil {
-						panic(err)
-					}
-					session.queue.UpdateHead(conn, session.party.ID.Hex())
-					conn.Close()
-
-					var event []byte
-					if ev.Bool(0) {
-						event, _ = json.Marshal(map[string]interface{}{
-							"type":  "player.play",
-							"queue": session.queue,
-						})
-					} else {
-						event, _ = json.Marshal(map[string]interface{}{
-							"type":  "player.resume",
-						})
-					}
+					event, _ := json.Marshal(map[string]interface{}{
+						"type": "player.play",
+					})
 
 					session.writeToClients(event)
 				}
@@ -161,13 +143,7 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 					session.state = PAUSED
 					log.Println("PAUSED")
 
-					conn, err := redis_store.GetConnection()
-
-					if err != nil {
-						panic(err)
-					}
-					session.queue.UpdateHead(conn, session.party.ID.Hex())
-					conn.Close()
+					session.PauseHead()
 
 					event, _ := json.Marshal(map[string]interface{}{
 						"type": "player.pause",
@@ -361,6 +337,36 @@ func (s *Session) Next() (error) {
 	return nil
 }
 
+func (s *Session) PlayHead() (error) {
+	if len(s.queue.Items) > 0 {
+		s.queue.Items[0].Play()
+
+		conn, err := s.redis.GetConnection()
+
+		if err != nil {
+			panic(err)
+		}
+		s.queue.UpdateHead(conn, s.party.ID.Hex())
+		conn.Close()
+	}
+	return nil
+}
+
+func (s *Session) PauseHead() (error) {
+	if len(s.queue.Items) > 0 {
+		s.queue.Items[0].Pause()
+
+		conn, err := s.redis.GetConnection()
+
+		if err != nil {
+			panic(err)
+		}
+		s.queue.UpdateHead(conn, s.party.ID.Hex())
+		conn.Close()
+	}
+	return nil
+}
+
 func (s *Session) Play() (error) {
 	if s.CurrentPlayer != nil {
 		if !s.CurrentPlayer.HasItems() {
@@ -377,6 +383,7 @@ func (s *Session) Play() (error) {
 					return err
 				} else {
 					s.state = PLAYING
+					s.PlayHead()
 				}
 			} else {
 				s.CurrentPlayer = nil
@@ -389,12 +396,14 @@ func (s *Session) Play() (error) {
 				if err := s.CurrentPlayer.Play(nil); err != nil {
 					return err
 				}
+				s.PlayHead()
 				s.state = PLAYING
 				break
 			case PAUSED:
 				if err := s.CurrentPlayer.Resume(); err != nil {
 					return err
 				}
+				s.PlayHead()
 				s.state = PLAYING
 			}
 		}
@@ -411,6 +420,7 @@ func (s *Session) Play() (error) {
 			if err := player.Play(items); err != nil {
 				return err
 			}
+			s.PlayHead()
 		} else {
 			return EmptyQueue
 		}
