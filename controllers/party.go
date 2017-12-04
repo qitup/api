@@ -195,19 +195,22 @@ func (c *PartyController) Join(context *gin.Context, cli *cli.Context) {
 
 	if err != nil {
 		context.AbortWithError(500, err)
+		return
 	}
-
-	attendee := models.NewAttendee(*user)
 
 	connect_token, err := party.InitiateConnect(conn, *party_record, user.ID)
 
-	if attendee.UserId != party_record.HostID {
+	if user.ID != party_record.HostID {
+		attendee := models.NewAttendee(*user)
+
 		if err := party_record.AddAttendee(db, &attendee); err != nil && err != mgo.ErrNotFound {
 			context.AbortWithError(500, err)
+			return
 		}
 
 		if err := party_session.AttendeesChanged(); err != nil {
 			context.AbortWithError(500, err)
+			return
 		}
 	}
 

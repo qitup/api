@@ -22,7 +22,7 @@ type APIClaims struct {
 const USER_COLLECTION = "users"
 
 type User struct {
-	ID         bson.ObjectId `json:"id" bson:"id"`
+	ID         bson.ObjectId `json:"id" bson:"_id"`
 	Identities []*Identity   `json:"-" bson:"identities"`
 	Email      string        `json:"email" bson:"email"`
 	Username   string        `json:"username" bson:"username"`
