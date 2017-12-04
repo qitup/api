@@ -202,11 +202,7 @@ func api(cli *cli.Context) error {
 
 	router.GET("/auth/:provider", func(context *gin.Context) {
 		// try to get the user without re-authenticating
-		if _, err := gothic.CompleteUserAuth(context.Writer, context.Request); err == nil {
-			context.Next()
-		} else {
-			gothic.BeginAuthHandler(context.Writer, context.Request)
-		}
+		gothic.BeginAuthHandler(context.Writer, context.Request)
 	})
 
 	router.GET("/spotify/token", auth_middleware.MiddlewareFunc(), func(context *gin.Context) {
