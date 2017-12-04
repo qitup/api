@@ -116,7 +116,7 @@ func api(cli *cli.Context) error {
 
 	// Initialize controllers
 	var (
-		user_controller  = controllers.NewUserController(mongo_store, redis_store)
+		user_controller  = controllers.NewUserController(mongo_store, redis_store, signing_key)
 		party_controller = controllers.NewPartyController(mongo_store, redis_store)
 	)
 

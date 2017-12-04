@@ -8,16 +8,54 @@ import (
 	"errors"
 	"dubclan/api/store"
 	"golang.org/x/crypto/bcrypt"
+	"strings"
+	"gopkg.in/dgrijalva/jwt-go.v3"
 )
 
 type UserController struct {
 	baseController
+	key []byte
 }
 
-func NewUserController(mongo *store.MongoStore, redis *store.RedisStore) UserController {
+func NewUserController(mongo *store.MongoStore, redis *store.RedisStore, key []byte) UserController {
 	return UserController{
-		newBaseController(mongo, redis),
+		baseController: newBaseController(mongo, redis),
+		key:            key,
 	}
+}
+
+func (c *UserController) jwtFromHeader(context *gin.Context, key string) (string, error) {
+	authHeader := context.Request.Header.Get(key)
+
+	if authHeader == "" {
+		return "", errors.New("auth header empty")
+	}
+
+	parts := strings.SplitN(authHeader, " ", 2)
+	if !(len(parts) == 2 && parts[0] == "Authorization") {
+		return "", errors.New("invalid auth header")
+	}
+
+	return parts[1], nil
+}
+
+func (c *UserController) parseToken(context *gin.Context) (*jwt.Token, error) {
+	var token string
+	var err error
+
+	token, err = c.jwtFromHeader(context, "Authorization")
+
+	if err != nil {
+		return nil, err
+	}
+
+	return jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
+		if jwt.GetSigningMethod("HS256") != token.Method {
+			return nil, errors.New("invalid signing algorithm")
+		}
+
+		return c.key, nil
+	})
 }
 
 // Request has jwt token for existing user?
@@ -33,8 +71,10 @@ func (c *UserController) CompleteUserAuth(context *gin.Context, assume_identity 
 	session, db := c.Mongo.DB()
 	defer session.Close()
 
-	if user_id, exists := context.Get("userID"); exists {
-		id := bson.ObjectIdHex(user_id.(string))
+	if token, err := c.parseToken(context); err == nil {
+		claims := token.Claims.(jwt.MapClaims)
+		id := bson.ObjectIdHex(claims["sub"].(string))
+
 		if err := models.UpdateUserIdentity(db, id, assume_identity); err == nil {
 			return &models.User{ID: id}, nil
 		} else {
@@ -150,7 +190,7 @@ func (c *UserController) Login(context *gin.Context, host string, key []byte) {
 	}
 
 	context.JSON(200, gin.H{
-		"token":  tokenString,
+		"token": tokenString,
 	})
 }
 
