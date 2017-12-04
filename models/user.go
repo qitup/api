@@ -104,7 +104,7 @@ func UpdateUserIdentity(db *mgo.Database, id bson.ObjectId, identity Identity) (
 
 	pairs := []interface{}{
 		bson.M{"_id": id},
-		bson.M{"$pull": bson.M{"identities.email": identity.Email, "identities.provider": identity.Provider}},
+		bson.M{"$pull": bson.M{"identities": bson.M{"email": identity.Email, "provider": identity.Provider}}},
 		bson.M{"_id": id},
 		bson.M{"$addToSet": bson.M{"identities": identity}},
 	}
@@ -116,7 +116,7 @@ func UpdateUserIdentity(db *mgo.Database, id bson.ObjectId, identity Identity) (
 		)
 	}
 
-	bulk.Update(pairs)
+	bulk.Update(pairs...)
 
 	_, err := bulk.Run()
 

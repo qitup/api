@@ -32,7 +32,7 @@ func (c *UserController) jwtFromHeader(context *gin.Context, key string) (string
 	}
 
 	parts := strings.SplitN(authHeader, " ", 2)
-	if !(len(parts) == 2 && parts[0] == "Authorization") {
+	if !(len(parts) == 2 && parts[0] == "Bearer") {
 		return "", errors.New("invalid auth header")
 	}
 
