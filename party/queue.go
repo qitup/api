@@ -18,7 +18,7 @@ func NewQueue() *Queue {
 }
 
 func ResumeQueue(conn redis.Conn, id string) (*Queue, error) {
-	if list, err := redis.Strings(conn.Do("LRANGE", QUEUE_PREFIX+id, 0, -1)); err == nil {
+	if list, err := redis.Strings(conn.Do("LRANGE", QueuePrefix+id, 0, -1)); err == nil {
 		queue := NewQueue()
 
 		u := &models.ItemUnpacker{}
@@ -57,7 +57,7 @@ func (q *Queue) GetNextPlayableList() []models.Item {
 
 func (q *Queue) Push(conn redis.Conn, id string, item models.Item) error {
 	if serialized, err := json.Marshal(item); err == nil {
-		_, err := conn.Do("LPUSH", QUEUE_PREFIX+id, serialized)
+		_, err := conn.Do("LPUSH", QueuePrefix+id, serialized)
 
 		if err == nil {
 			q.Items = append(q.Items, item)
@@ -70,7 +70,7 @@ func (q *Queue) Push(conn redis.Conn, id string, item models.Item) error {
 }
 
 func (q *Queue) Pop(conn redis.Conn, id string) (models.Item, error) {
-	if raw, err := redis.String(conn.Do("RPOP", QUEUE_PREFIX+id)); err == nil {
+	if raw, err := redis.String(conn.Do("RPOP", QueuePrefix+id)); err == nil {
 		_, q.Items = q.Items[0], q.Items[1:]
 
 		u := &models.ItemUnpacker{}
@@ -86,7 +86,7 @@ func (q *Queue) Pop(conn redis.Conn, id string) (models.Item, error) {
 
 func (q *Queue) UpdateHead(conn redis.Conn, id string) error {
 	if serialized, err := json.Marshal(q.Items[0]); err == nil {
-		_, err := conn.Do("LSET", QUEUE_PREFIX+id, -1, serialized)
+		_, err := conn.Do("LSET", QueuePrefix+id, -1, serialized)
 
 		return err
 	} else {
@@ -95,7 +95,7 @@ func (q *Queue) UpdateHead(conn redis.Conn, id string) error {
 }
 
 func (q *Queue) Delete(conn redis.Conn, id string) error {
-	_, err := conn.Do("DEL", QUEUE_PREFIX+id)
+	_, err := conn.Do("DEL", QueuePrefix+id)
 
 	return err
 }

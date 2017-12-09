@@ -101,7 +101,7 @@ func (c *UserController) CompleteUserAuth(context *gin.Context, assume_identity 
 	}
 }
 
-func (c *UserController) Signup(context *gin.Context, host string, key []byte) {
+func (c *UserController) Signup(context *gin.Context, host string) {
 	var fields struct {
 		Email    string `json:"email" binding:"required"`
 		Password string `json:"password" binding:"required"`
@@ -145,7 +145,7 @@ func (c *UserController) Signup(context *gin.Context, host string, key []byte) {
 		return
 	}
 
-	token, err := new_user.NewToken(host, key)
+	token, err := new_user.NewToken(host, c.key)
 	if err != nil {
 		context.AbortWithError(500, err)
 	}
@@ -155,7 +155,7 @@ func (c *UserController) Signup(context *gin.Context, host string, key []byte) {
 	})
 }
 
-func (c *UserController) Login(context *gin.Context, host string, key []byte) {
+func (c *UserController) Login(context *gin.Context, host string) {
 	var loginVals struct {
 		Email    string `json:"email" binding:"required"`
 		Password string `json:"password" binding:"required"`
@@ -182,7 +182,7 @@ func (c *UserController) Login(context *gin.Context, host string, key []byte) {
 	}
 
 	// Create the token
-	tokenString, err := user.NewToken(host, key)
+	tokenString, err := user.NewToken(host, c.key)
 
 	if err != nil {
 		context.AbortWithError(500, err)

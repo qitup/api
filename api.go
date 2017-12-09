@@ -1,27 +1,29 @@
 package main
 
 import (
-	"github.com/gin-gonic/gin"
-	"gopkg.in/mgo.v2"
-	"dubclan/api/store"
-	"dubclan/api/controllers"
-	"net/http"
-	"github.com/markbates/goth"
-	"github.com/terev/goth/gothic"
-	"strings"
-	"gopkg.in/dgrijalva/jwt-go.v3"
-	jwt_middleware "github.com/appleboy/gin-jwt"
-	"time"
-	"github.com/urfave/cli"
-	"dubclan/api/models"
-	"github.com/olahol/melody"
+	"encoding/base64"
 	"encoding/json"
 	"log"
-	"encoding/base64"
+	"net/http"
+	"strings"
+	"time"
+
+	"dubclan/api/controllers"
+	"dubclan/api/models"
+	spotifyPlayer "dubclan/api/player/spotify"
+	"dubclan/api/store"
+
+	jwtMiddleware "github.com/appleboy/gin-jwt"
+	"github.com/gin-gonic/gin"
+	"github.com/markbates/goth"
+	"github.com/olahol/melody"
+	"github.com/terev/goth/gothic"
 	"github.com/unrolled/secure"
-	spotify_player "dubclan/api/party/spotify"
-	"golang.org/x/oauth2/clientcredentials"
+	"github.com/urfave/cli"
 	"github.com/zmb3/spotify"
+	"golang.org/x/oauth2/clientcredentials"
+	"gopkg.in/dgrijalva/jwt-go.v3"
+	"gopkg.in/mgo.v2"
 )
 
 func secureHeaders(cli *cli.Context) gin.HandlerFunc {
@@ -55,10 +57,10 @@ func secureHeaders(cli *cli.Context) gin.HandlerFunc {
 }
 
 func decodeSigningKey(cli *cli.Context) ([]byte, error) {
-	key_data := cli.String("signing-key")
+	keyData := cli.String("signing-key")
 
 	// Decode the signing key
-	if key, err := base64.StdEncoding.DecodeString(key_data); err == nil {
+	if key, err := base64.StdEncoding.DecodeString(keyData); err == nil {
 		return key, nil
 	} else {
 		return nil, err
@@ -66,7 +68,7 @@ func decodeSigningKey(cli *cli.Context) ([]byte, error) {
 }
 
 func api(cli *cli.Context) error {
-	signing_key, err := decodeSigningKey(cli)
+	signingKey, err := decodeSigningKey(cli)
 	if err != nil {
 		panic(err)
 	}
@@ -77,13 +79,13 @@ func api(cli *cli.Context) error {
 	m := melody.New()
 	m.Config.MaxMessageSize = 8192
 
-	redis_store := store.NewRedisStore(10, "tcp", "redis:6379", "")
+	redisStore := store.NewRedisStore(10, "tcp", "redis:6379", "")
 
-	session_store, err := redis_store.GetSessionStore([]byte(cli.String("session-secret")))
+	sessionStore, err := redisStore.GetSessionStore([]byte(cli.String("session-secret")))
 	if err != nil {
 		panic(err)
 	}
-	gothic.Store = session_store
+	gothic.Store = sessionStore
 
 	session, err := mgo.Dial("mongodb://mongodb:27017")
 
@@ -92,7 +94,7 @@ func api(cli *cli.Context) error {
 	}
 	defer session.Close()
 
-	mongo_store := store.NewMongoStore(session, cli.String("database"))
+	mongoStore := store.NewMongoStore(session, cli.String("database"))
 
 	index := mgo.Index{
 		Key:    []string{"join_code"},
@@ -116,25 +118,25 @@ func api(cli *cli.Context) error {
 
 	// Initialize controllers
 	var (
-		user_controller  = controllers.NewUserController(mongo_store, redis_store, signing_key)
-		party_controller = controllers.NewPartyController(mongo_store, redis_store)
+		userController  = controllers.NewUserController(mongoStore, redisStore, signingKey)
+		partyController = controllers.NewPartyController(mongoStore, redisStore)
 	)
 
-	var http_protocol string
+	var httpProtocol string
 	if cli.Bool("secured") {
-		http_protocol = "https"
+		httpProtocol = "https"
 	} else {
-		http_protocol = "http"
+		httpProtocol = "http"
 	}
 
-	var callback_url string
+	var callbackUrl string
 	if cli.Bool("public") {
-		callback_url = http_protocol + "://" + cli.String("host")
+		callbackUrl = httpProtocol + "://" + cli.String("host")
 	} else {
-		callback_url = http_protocol + "://" + cli.String("host") + ":" + cli.String("port")
+		callbackUrl = httpProtocol + "://" + cli.String("host") + ":" + cli.String("port")
 	}
 
-	goth.UseProviders(spotify_player.InitProvider(callback_url, cli))
+	goth.UseProviders(spotifyPlayer.InitProvider(callbackUrl, cli))
 
 	gothic.GetProviderName = func(req *http.Request) (string, error) {
 		parts := strings.Split(req.URL.Path, "/")
@@ -142,9 +144,9 @@ func api(cli *cli.Context) error {
 		return parts[2], nil
 	}
 
-	auth_middleware := &jwt_middleware.GinJWTMiddleware{
+	authMiddleware := &jwtMiddleware.GinJWTMiddleware{
 		Realm:      "api",
-		Key:        signing_key,
+		Key:        signingKey,
 		Timeout:    time.Hour * 5,
 		MaxRefresh: time.Hour * 24,
 
@@ -156,11 +158,11 @@ func api(cli *cli.Context) error {
 	}
 
 	router.POST("/login", func(context *gin.Context) {
-		user_controller.Login(context, cli.String("host"), signing_key)
+		userController.Login(context, cli.String("host"))
 	})
 
 	router.POST("/signup", func(context *gin.Context) {
-		user_controller.Signup(context, cli.String("host"), signing_key)
+		userController.Signup(context, cli.String("host"))
 	})
 
 	router.GET("/auth/:provider/callback", func(context *gin.Context) {
@@ -170,19 +172,19 @@ func api(cli *cli.Context) error {
 			return
 		}
 
-		user, err := user_controller.CompleteUserAuth(context, models.Identity(identity))
+		user, err := userController.CompleteUserAuth(context, models.Identity(identity))
 		if err != nil {
 			context.AbortWithError(500, err)
 			return
 		}
 
-		token_blob, err := user.NewToken(cli.String("host"), signing_key)
+		tokenBlob, err := user.NewToken(cli.String("host"), signingKey)
 		if err != nil {
 			context.Error(err)
 		}
 
 		res := gin.H{
-			"token": token_blob,
+			"token": tokenBlob,
 		}
 
 		if identity.Provider == "spotify" {
@@ -205,7 +207,7 @@ func api(cli *cli.Context) error {
 		gothic.BeginAuthHandler(context.Writer, context.Request)
 	})
 
-	router.GET("/spotify/token", auth_middleware.MiddlewareFunc(), func(context *gin.Context) {
+	router.GET("/spotify/token", authMiddleware.MiddlewareFunc(), func(context *gin.Context) {
 		config := &clientcredentials.Config{
 			ClientID:     cli.String("spotify-id"),
 			ClientSecret: cli.String("spotify-secret"),
@@ -221,39 +223,39 @@ func api(cli *cli.Context) error {
 		context.JSON(200, token)
 	})
 
-	party_group := router.Group("/party", auth_middleware.MiddlewareFunc())
+	partyGroup := router.Group("/party", authMiddleware.MiddlewareFunc())
 
-	party_group.GET("/", party_controller.Get)
+	partyGroup.GET("/", partyController.Get)
 
 	// party creation route
-	party_group.POST("/", func(context *gin.Context) {
-		party_controller.Create(context, cli)
+	partyGroup.POST("/", func(context *gin.Context) {
+		partyController.Create(context, cli)
 	})
 
-	party_group.GET("/join", func(context *gin.Context) {
-		party_controller.Join(context, cli)
+	partyGroup.GET("/join", func(context *gin.Context) {
+		partyController.Join(context, cli)
 	})
 
-	party_group.GET("/leave", party_controller.Leave)
+	partyGroup.GET("/leave", partyController.Leave)
 
-	party_group.GET("/connect/:code", func(context *gin.Context) {
-		party_controller.Connect(context, m)
+	partyGroup.GET("/connect/:code", func(context *gin.Context) {
+		partyController.Connect(context, m)
 	})
 
-	party_group.POST("/push", party_controller.PushHTTP)
+	partyGroup.POST("/push", partyController.PushHTTP)
 
-	party_group.GET("/player/play", party_controller.Play)
+	partyGroup.GET("/player/play", partyController.Play)
 
-	party_group.GET("/player/pause", party_controller.Pause)
+	partyGroup.GET("/player/pause", partyController.Pause)
 
-	party_group.GET("/player/next", party_controller.Next)
+	partyGroup.GET("/player/next", partyController.Next)
 
 	// Handle channel connections
 	m.HandleConnect(func(s *melody.Session) {
 		if channel, ok := s.Get("channel"); ok {
 			switch channel {
 			case "party":
-				party_controller.HandleConnect(s)
+				partyController.HandleConnect(s)
 				break
 			default:
 				log.Println("Connection to invalid channel detected, closing...")
@@ -267,11 +269,10 @@ func api(cli *cli.Context) error {
 		if channel, ok := s.Get("channel"); ok {
 			switch channel {
 			case "party":
-				party_controller.HandleDisconnect(s)
+				partyController.HandleDisconnect(s)
 				break
 			default:
 				log.Println("Disconnect from invalid channel detected, closing...")
-				s.Close()
 			}
 		}
 	})
@@ -280,7 +281,7 @@ func api(cli *cli.Context) error {
 		var msg map[string]*json.RawMessage
 
 		if err := json.Unmarshal(data, &msg); err != nil {
-			error_res, _ := json.Marshal(gin.H{
+			errorRes, _ := json.Marshal(gin.H{
 				"type": "error",
 				"error": gin.H{
 					"code": "invalid_json",
@@ -288,18 +289,18 @@ func api(cli *cli.Context) error {
 				},
 			})
 
-			s.Write([]byte(error_res))
+			s.Write([]byte(errorRes))
 			return
 		}
 
 		if raw, ok := msg["type"]; ok {
-			var msg_type string
-			if err := json.Unmarshal(*raw, &msg_type); err != nil {
+			var msgType string
+			if err := json.Unmarshal(*raw, &msgType); err != nil {
 				log.Println(err)
 				return
 			}
 
-			switch msg_type {
+			switch msgType {
 			case "ping":
 				res, _ := json.Marshal(gin.H{
 					"type": "pong",
@@ -309,11 +310,11 @@ func api(cli *cli.Context) error {
 				s.Write([]byte(res))
 				break
 			case "queue.push":
-				party_controller.PushSocket(s, *msg["item"])
+				partyController.PushSocket(s, *msg["item"])
 				break
 			}
 		} else {
-			error_res, _ := json.Marshal(gin.H{
+			errorRes, _ := json.Marshal(gin.H{
 				"type": "error",
 				"error": gin.H{
 					"code": "invalid_message",
@@ -321,12 +322,12 @@ func api(cli *cli.Context) error {
 				},
 			})
 
-			s.Write([]byte(error_res))
+			s.Write([]byte(errorRes))
 		}
 	})
 
-	me := router.Group("/me", auth_middleware.MiddlewareFunc())
-	me.GET("/", user_controller.Me)
+	me := router.Group("/me", authMiddleware.MiddlewareFunc())
+	me.GET("/", userController.Me)
 
 	return router.Run(":" + cli.String("port"))
 }

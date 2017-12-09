@@ -18,19 +18,19 @@ import (
 
 type PartyController struct {
 	baseController
-	party_sessions map[string]*party.Session
+	partySessions map[string]*party.Session
 }
 
 func NewPartyController(mongo *store.MongoStore, redis *store.RedisStore) PartyController {
 	return PartyController{
 		baseController: newBaseController(mongo, redis),
-		party_sessions: make(map[string]*party.Session),
+		partySessions:  make(map[string]*party.Session),
 	}
 }
 
 func (c *PartyController) OnSessionClose(id string) {
-	if _, ok := c.party_sessions[id]; ok {
-		delete(c.party_sessions, id)
+	if _, ok := c.partySessions[id]; ok {
+		delete(c.partySessions, id)
 	}
 }
 
@@ -40,7 +40,7 @@ func (c *PartyController) Get(context *gin.Context) {
 
 	code := context.Query("code")
 
-	party_record, err := models.PartyByCode(db, code)
+	partyRecord, err := models.PartyByCode(db, code)
 
 	if err == mgo.ErrNotFound {
 		context.JSON(400, gin.H{
@@ -55,7 +55,7 @@ func (c *PartyController) Get(context *gin.Context) {
 		return
 	}
 
-	context.JSON(200, party_record)
+	context.JSON(200, partyRecord)
 }
 
 func (c *PartyController) Create(context *gin.Context, cli *cli.Context) {
@@ -101,7 +101,7 @@ func (c *PartyController) Create(context *gin.Context, cli *cli.Context) {
 		queue := party.NewQueue()
 		session := party.NewSession(&party_record, queue, c.Mongo, c.Redis, c.OnSessionClose)
 
-		c.party_sessions[party_record.ID.Hex()] = session
+		c.partySessions[party_record.ID.Hex()] = session
 
 		connect_token, err := party.InitiateConnect(conn, party_record, bson.ObjectIdHex(context.GetString("userID")))
 
@@ -168,7 +168,7 @@ func (c *PartyController) Join(context *gin.Context, cli *cli.Context) {
 		return
 	}
 
-	party_session, ok := c.party_sessions[party_record.ID.Hex()]
+	party_session, ok := c.partySessions[party_record.ID.Hex()]
 
 	conn, err := c.Redis.GetConnection()
 	if err != nil {
@@ -181,12 +181,12 @@ func (c *PartyController) Join(context *gin.Context, cli *cli.Context) {
 	} else if queue, err := party.ResumeQueue(conn, party_record.ID.Hex()); err == nil {
 		party_session = party.NewSession(party_record, queue, c.Mongo, c.Redis, c.OnSessionClose)
 
-		c.party_sessions[party_record.ID.Hex()] = party_session
+		c.partySessions[party_record.ID.Hex()] = party_session
 	} else if err == redis.ErrNil {
 		queue = party.NewQueue()
 		party_session = party.NewSession(party_record, queue, c.Mongo, c.Redis, c.OnSessionClose)
 
-		c.party_sessions[party_record.ID.Hex()] = party_session
+		c.partySessions[party_record.ID.Hex()] = party_session
 	} else {
 		context.AbortWithError(500, err)
 	}
@@ -257,7 +257,7 @@ func (c *PartyController) Leave(context *gin.Context) {
 	session, db := c.Mongo.DB()
 	defer session.Close()
 
-	party_session, session_exists := c.party_sessions[party_id]
+	party_session, session_exists := c.partySessions[party_id]
 
 	var party_record *models.Party
 	var err error
@@ -414,7 +414,7 @@ func (c *PartyController) HandleConnect(s *melody.Session) {
 	party_id := s.MustGet("party_id").(string)
 
 	// Notify others this attendee has become active
-	if session, ok := c.party_sessions[party_id]; ok {
+	if session, ok := c.partySessions[party_id]; ok {
 		session.ClientConnected(s)
 	} else {
 		log.Printf("No party session exists for (%s), something's fucky", party_id)
@@ -432,7 +432,7 @@ func (c *PartyController) HandleConnect(s *melody.Session) {
 func (c *PartyController) HandleDisconnect(s *melody.Session) {
 	party_id, _ := s.Get("party_id")
 
-	if session, ok := c.party_sessions[party_id.(string)]; ok {
+	if session, ok := c.partySessions[party_id.(string)]; ok {
 		// Cleanup session from the party map
 		session.ClientDisconnected(s)
 	} else {
@@ -465,7 +465,7 @@ func (c *PartyController) PushSocket(s *melody.Session, raw_item json.RawMessage
 
 	party_id, _ := s.Get("party_id")
 
-	if session, ok := c.party_sessions[party_id.(string)]; ok {
+	if session, ok := c.partySessions[party_id.(string)]; ok {
 		// Cleanup session from the party map
 		if err := session.Push(item); err != nil {
 			log.Println("Failed pushing item to queue", err)
@@ -499,7 +499,7 @@ func (c *PartyController) PushHTTP(context *gin.Context) {
 
 	party_id := context.Query("id")
 
-	if session, ok := c.party_sessions[party_id]; ok {
+	if session, ok := c.partySessions[party_id]; ok {
 		// Cleanup session from the party map
 		if err := session.Push(item); err != nil {
 			context.AbortWithError(500, err)
@@ -523,7 +523,7 @@ func (c *PartyController) Play(context *gin.Context) {
 		})
 	}
 
-	if session, ok := c.party_sessions[party_id.Hex()]; ok {
+	if session, ok := c.partySessions[party_id.Hex()]; ok {
 		if err := session.Play(); err != nil {
 			context.AbortWithError(500, err)
 		} else {
@@ -545,7 +545,7 @@ func (c *PartyController) Pause(context *gin.Context) {
 		})
 	}
 
-	if session, ok := c.party_sessions[party_id.Hex()]; ok {
+	if session, ok := c.partySessions[party_id.Hex()]; ok {
 		if err := session.Pause(); err != nil {
 			context.AbortWithError(500, err)
 		} else {
@@ -567,7 +567,7 @@ func (c *PartyController) Next(context *gin.Context) {
 		})
 	}
 
-	if session, ok := c.party_sessions[party_id.Hex()]; ok {
+	if session, ok := c.partySessions[party_id.Hex()]; ok {
 		if err := session.Next(); err != nil {
 			context.AbortWithError(500, err)
 		} else {
