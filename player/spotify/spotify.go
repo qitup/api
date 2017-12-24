@@ -1,6 +1,7 @@
 package spotify
 
 import (
+	"errors"
 	"log"
 	"sync"
 	"time"
@@ -39,7 +40,7 @@ func InitProvider(callbackUrl string, cli *cli.Context) goth.Provider {
 	return provider
 }
 
-type SpotifyPlayer struct {
+type Player struct {
 	emitter       *emitter.Emitter
 	client        spotify.Client
 	refreshing    sync.RWMutex // Locked whilst refreshing host's access token
@@ -51,9 +52,9 @@ type SpotifyPlayer struct {
 	state         int
 }
 
-func New(emitter *emitter.Emitter, token *oauth2.Token, deviceId *string) (*SpotifyPlayer, error) {
+func New(emitter *emitter.Emitter, token *oauth2.Token, deviceId *string) (*Player, error) {
 
-	return &SpotifyPlayer{
+	return &Player{
 		emitter:       emitter,
 		client:        authenticator.NewClient(token),
 		playbackState: nil,
@@ -62,17 +63,19 @@ func New(emitter *emitter.Emitter, token *oauth2.Token, deviceId *string) (*Spot
 	}, nil
 }
 
-func (p *SpotifyPlayer) Stop() {
+func (p *Player) Stop() {
 	p.stopPolling()
 }
 
-func (p *SpotifyPlayer) Play(items []models.Item) (error) {
+func (p *Player) Play(items []models.Item) (error) {
 	switch p.state {
+	case player.PLAYING:
+		return errors.New("already playing")
+	case player.PAUSED:
+		return p.Resume()
 	case player.INTERRUPTED:
 		items = p.currentItems
 		break
-	case player.PAUSED:
-		return p.Resume()
 	}
 
 	var uris []spotify.URI
@@ -104,7 +107,14 @@ func (p *SpotifyPlayer) Play(items []models.Item) (error) {
 	return nil
 }
 
-func (p *SpotifyPlayer) Resume() (error) {
+func (p *Player) Resume() (error) {
+	switch p.state {
+	case player.PLAYING:
+		return errors.New("already playing")
+	case player.INTERRUPTED:
+		return p.Play(p.currentItems)
+	}
+
 	// SPOTIFY RETURNS A SERVER ERROR IF THERE IS A TRACK CURRENTLY PLAYING
 	if err := p.client.Play(); err != nil {
 		return err
@@ -117,7 +127,7 @@ func (p *SpotifyPlayer) Resume() (error) {
 	return nil
 }
 
-func (p *SpotifyPlayer) Pause() (error) {
+func (p *Player) Pause() (error) {
 	if err := p.client.Pause(); err != nil {
 		return err
 	}
@@ -129,7 +139,7 @@ func (p *SpotifyPlayer) Pause() (error) {
 	return nil
 }
 
-func (p *SpotifyPlayer) Next() (error) {
+func (p *Player) Next() (error) {
 	//if err := p.client.Next(); err != nil {
 	//	return err
 	//}
@@ -139,15 +149,15 @@ func (p *SpotifyPlayer) Next() (error) {
 	panic("NOT IMPLEMENTED")
 }
 
-func (p *SpotifyPlayer) Previous() (error) {
+func (p *Player) Previous() (error) {
 	panic("implement me")
 }
 
-func (p *SpotifyPlayer) HasItems() (bool) {
+func (p *Player) HasItems() (bool) {
 	return len(p.currentItems) > 0
 }
 
-func (p *SpotifyPlayer) stopPolling() {
+func (p *Player) stopPolling() {
 	if p.ticker != nil {
 		// Stop delivering ticks
 		p.ticker.Stop()
@@ -156,7 +166,7 @@ func (p *SpotifyPlayer) stopPolling() {
 	}
 }
 
-func (p *SpotifyPlayer) startPolling(interval time.Duration) {
+func (p *Player) startPolling(interval time.Duration) {
 	if p.ticker == nil {
 		p.stop = make(chan bool)
 		p.ticker = time.NewTicker(interval)
@@ -165,7 +175,7 @@ func (p *SpotifyPlayer) startPolling(interval time.Duration) {
 }
 
 // Update the state of the players until a session becomes inactive
-func (p *SpotifyPlayer) poll() {
+func (p *Player) poll() {
 	for {
 		select {
 		// Update states of our players
@@ -194,7 +204,7 @@ func (p *SpotifyPlayer) poll() {
 	}
 }
 
-func (p *SpotifyPlayer) current() spotify.URI {
+func (p *Player) current() spotify.URI {
 	if len(p.currentItems) < 1 {
 		return ""
 	}
@@ -210,7 +220,7 @@ func (p *SpotifyPlayer) current() spotify.URI {
 	return ""
 }
 
-func (p *SpotifyPlayer) peekNext() spotify.URI {
+func (p *Player) peekNext() spotify.URI {
 	if len(p.currentItems) <= 1 {
 		return ""
 	}
@@ -226,11 +236,11 @@ func (p *SpotifyPlayer) peekNext() spotify.URI {
 	return ""
 }
 
-func (p *SpotifyPlayer) GetState() int {
+func (p *Player) GetState() int {
 	return p.state
 }
 
-func (p *SpotifyPlayer) UpdateState(newState *spotify.PlayerState) (error) {
+func (p *Player) UpdateState(newState *spotify.PlayerState) (error) {
 	if p.playbackState == nil {
 		if newState.Playing {
 			if newState.Item.URI == p.current() {

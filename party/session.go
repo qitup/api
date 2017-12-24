@@ -46,12 +46,12 @@ type Session struct {
 	timeout       *time.Timer
 	timeoutMutex  sync.Mutex
 
-	stop    chan bool
-	waiter  sync.WaitGroup
-	onClose func(id string)
+	stop     chan bool
+	waiter   sync.WaitGroup
+	onClosed func(id string)
 }
 
-func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redisStore *store.RedisStore, onClose func(id string)) (*Session) {
+func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redisStore *store.RedisStore, onClosed func(id string)) (*Session) {
 	session := &Session{
 		mongo:        mongo,
 		redis:        redisStore,
@@ -61,7 +61,7 @@ func NewSession(party *models.Party, queue *Queue, mongo *store.MongoStore, redi
 		players:      make(map[string]player.Player),
 		emitter:      emitter.New(10),
 		stop:         make(chan bool),
-		onClose:      onClose,
+		onClosed:     onClosed,
 		timeoutMutex: sync.Mutex{},
 	}
 
@@ -287,7 +287,7 @@ func (s *Session) Close() {
 		client.Close()
 	}
 
-	s.onClose(s.party.ID.Hex())
+	s.onClosed(s.party.ID.Hex())
 }
 
 func (s *Session) Pause() (error) {
@@ -349,7 +349,13 @@ func (s *Session) UpdateHead() (error) {
 
 func (s *Session) Play() (error) {
 	if s.CurrentPlayer != nil {
-		if !s.CurrentPlayer.HasItems() {
+		if s.CurrentPlayer.HasItems() {
+			if err := s.CurrentPlayer.Resume(); err != nil {
+				return err
+			}
+
+			s.UpdateHead()
+		} else {
 			items := s.queue.GetNextPlayableList()
 			if len(items) > 0 {
 				p, err := s.GetPlayerForItem(items[0])
@@ -368,12 +374,6 @@ func (s *Session) Play() (error) {
 				s.CurrentPlayer = nil
 				return EmptyQueue
 			}
-		} else {
-			if err := s.CurrentPlayer.Play(nil); err != nil {
-				return err
-			}
-
-			s.UpdateHead()
 		}
 	} else {
 		items := s.queue.GetNextPlayableList()
@@ -409,14 +409,14 @@ func (s *Session) GetPlayerForItem(item models.Item) (player.Player, error) {
 			err error
 		)
 
+		token := s.party.Host.GetIdentityToken(playerType)
+
+		if token == nil {
+			return nil, errors.New("host has no " + playerType + " token")
+		}
+
 		switch playerType {
 		case "spotify":
-			token := s.party.Host.GetIdentityToken("spotify")
-
-			if token == nil {
-				log.Println("NIL TOKEN")
-			}
-
 			p, err = spotify.New(s.emitter, token, nil)
 			break
 		}
@@ -460,7 +460,8 @@ func (s *Session) TransferHost(to models.User) error {
 		s.CurrentPlayer = nil
 	}
 
-	for key := range s.players {
+	for key, p := range s.players {
+		p.Stop()
 		delete(s.players, key)
 	}
 

@@ -1,19 +1,21 @@
 package controllers
 
 import (
+	"encoding/json"
+	"errors"
+	"log"
+	"net/url"
+
 	"dubclan/api/models"
 	"dubclan/api/party"
-	"github.com/gin-gonic/gin"
-	"gopkg.in/mgo.v2/bson"
-	"gopkg.in/mgo.v2"
-	"github.com/urfave/cli"
-	"net/url"
 	"dubclan/api/store"
-	"github.com/olahol/melody"
-	"encoding/json"
-	"log"
+
 	"github.com/garyburd/redigo/redis"
-	"errors"
+	"github.com/gin-gonic/gin"
+	"github.com/olahol/melody"
+	"github.com/urfave/cli"
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
 )
 
 type PartyController struct {
@@ -68,12 +70,12 @@ func (c *PartyController) Create(context *gin.Context, cli *cli.Context) {
 		Settings models.Settings `json:"settings"`
 	}
 
-	user_id := bson.ObjectIdHex(context.MustGet("userID").(string))
+	userId := bson.ObjectIdHex(context.MustGet("userID").(string))
 
 	if context.BindJSON(&data) == nil {
-		party_record := models.NewParty(user_id, data.Name, data.JoinCode, data.Settings)
+		partyRecord := models.NewParty(userId, data.Name, data.JoinCode, data.Settings)
 
-		err := party_record.Insert(db)
+		err := partyRecord.Insert(db)
 
 		if mgo.IsDup(err) {
 			context.JSON(400, gin.H{
@@ -87,7 +89,7 @@ func (c *PartyController) Create(context *gin.Context, cli *cli.Context) {
 		}
 
 		// Get the host details
-		if err := party_record.WithHost(db); err != nil {
+		if err := partyRecord.WithHost(db); err != nil {
 			context.AbortWithError(500, err)
 			return
 		}
@@ -99,31 +101,31 @@ func (c *PartyController) Create(context *gin.Context, cli *cli.Context) {
 		defer conn.Close()
 
 		queue := party.NewQueue()
-		session := party.NewSession(&party_record, queue, c.Mongo, c.Redis, c.OnSessionClose)
+		session := party.NewSession(&partyRecord, queue, c.Mongo, c.Redis, c.OnSessionClose)
 
-		c.partySessions[party_record.ID.Hex()] = session
+		c.partySessions[partyRecord.ID.Hex()] = session
 
-		connect_token, err := party.InitiateConnect(conn, party_record, bson.ObjectIdHex(context.GetString("userID")))
+		connectToken, err := party.InitiateConnect(conn, partyRecord, bson.ObjectIdHex(context.GetString("userID")))
 
-		var ws_protocol string
+		var wsProtocol string
 		if cli.Bool("secured") {
-			ws_protocol = "wss"
+			wsProtocol = "wss"
 		} else {
-			ws_protocol = "ws"
+			wsProtocol = "ws"
 		}
 
-		var connect_url string
+		var connectUrl string
 		if cli.Bool("public") {
-			connect_url = ws_protocol + "://" + cli.String("host")
+			connectUrl = wsProtocol + "://" + cli.String("host")
 		} else {
-			connect_url = ws_protocol + "://" + cli.String("host") + ":" + cli.String("port")
+			connectUrl = wsProtocol + "://" + cli.String("host") + ":" + cli.String("port")
 		}
 
 		switch err {
 		case nil:
 			context.JSON(201, gin.H{
-				"url":   connect_url + "/party/connect/" + url.PathEscape(connect_token),
-				"party": party_record,
+				"url":   connectUrl + "/party/connect/" + url.PathEscape(connectToken),
+				"party": partyRecord,
 				"queue": queue,
 			})
 			return
@@ -153,7 +155,7 @@ func (c *PartyController) Join(context *gin.Context, cli *cli.Context) {
 
 	code := context.Query("code")
 
-	party_record, err := models.PartyByCode(db, code)
+	partyRecord, err := models.PartyByCode(db, code)
 
 	if err == mgo.ErrNotFound {
 		context.JSON(400, gin.H{
@@ -168,7 +170,7 @@ func (c *PartyController) Join(context *gin.Context, cli *cli.Context) {
 		return
 	}
 
-	party_session, ok := c.partySessions[party_record.ID.Hex()]
+	partySession, ok := c.partySessions[partyRecord.ID.Hex()]
 
 	conn, err := c.Redis.GetConnection()
 	if err != nil {
@@ -177,16 +179,16 @@ func (c *PartyController) Join(context *gin.Context, cli *cli.Context) {
 	defer conn.Close()
 
 	if ok {
-		party_record = party_session.GetParty()
-	} else if queue, err := party.ResumeQueue(conn, party_record.ID.Hex()); err == nil {
-		party_session = party.NewSession(party_record, queue, c.Mongo, c.Redis, c.OnSessionClose)
+		partyRecord = partySession.GetParty()
+	} else if queue, err := party.ResumeQueue(conn, partyRecord.ID.Hex()); err == nil {
+		partySession = party.NewSession(partyRecord, queue, c.Mongo, c.Redis, c.OnSessionClose)
 
-		c.partySessions[party_record.ID.Hex()] = party_session
+		c.partySessions[partyRecord.ID.Hex()] = partySession
 	} else if err == redis.ErrNil {
 		queue = party.NewQueue()
-		party_session = party.NewSession(party_record, queue, c.Mongo, c.Redis, c.OnSessionClose)
+		partySession = party.NewSession(partyRecord, queue, c.Mongo, c.Redis, c.OnSessionClose)
 
-		c.partySessions[party_record.ID.Hex()] = party_session
+		c.partySessions[partyRecord.ID.Hex()] = partySession
 	} else {
 		context.AbortWithError(500, err)
 	}
@@ -198,42 +200,42 @@ func (c *PartyController) Join(context *gin.Context, cli *cli.Context) {
 		return
 	}
 
-	connect_token, err := party.InitiateConnect(conn, *party_record, user.ID)
+	connectToken, err := party.InitiateConnect(conn, *partyRecord, user.ID)
 
-	if user.ID != party_record.HostID {
+	if user.ID != partyRecord.HostID {
 		attendee := models.NewAttendee(*user)
 
-		if err := party_record.AddAttendee(db, &attendee); err != nil && err != mgo.ErrNotFound {
+		if err := partyRecord.AddAttendee(db, &attendee); err != nil && err != mgo.ErrNotFound {
 			context.AbortWithError(500, err)
 			return
 		}
 
-		if err := party_session.AttendeesChanged(); err != nil {
+		if err := partySession.AttendeesChanged(); err != nil {
 			context.AbortWithError(500, err)
 			return
 		}
 	}
 
-	var ws_protocol string
+	var wsProtocol string
 	if cli.Bool("secured") {
-		ws_protocol = "wss"
+		wsProtocol = "wss"
 	} else {
-		ws_protocol = "ws"
+		wsProtocol = "ws"
 	}
 
-	var connect_url string
+	var connectUrl string
 	if cli.Bool("public") {
-		connect_url = ws_protocol + "://" + cli.String("host")
+		connectUrl = wsProtocol + "://" + cli.String("host")
 	} else {
-		connect_url = ws_protocol + "://" + cli.String("host") + ":" + cli.String("port")
+		connectUrl = wsProtocol + "://" + cli.String("host") + ":" + cli.String("port")
 	}
 
 	switch err {
 	case nil:
 		res := gin.H{
-			"url":   connect_url + "/party/connect/" + url.PathEscape(connect_token),
-			"party": party_record,
-			"queue": party_session.GetQueue(),
+			"url":   connectUrl + "/party/connect/" + url.PathEscape(connectToken),
+			"party": partyRecord,
+			"queue": partySession.GetQueue(),
 		}
 
 		context.JSON(200, res)
@@ -251,21 +253,21 @@ func (c *PartyController) Join(context *gin.Context, cli *cli.Context) {
 }
 
 func (c *PartyController) Leave(context *gin.Context) {
-	party_id := context.Query("id")
-	user_id := bson.ObjectIdHex(context.MustGet("userID").(string))
+	partyId := context.Query("id")
+	userId := bson.ObjectIdHex(context.MustGet("userID").(string))
 
 	session, db := c.Mongo.DB()
 	defer session.Close()
 
-	party_session, session_exists := c.partySessions[party_id]
+	partySession, sessionExists := c.partySessions[partyId]
 
-	var party_record *models.Party
+	var partyRecord *models.Party
 	var err error
 
-	if session_exists {
-		party_record = party_session.GetParty()
+	if sessionExists {
+		partyRecord = partySession.GetParty()
 	} else {
-		party_record, err = models.PartyByID(db, bson.ObjectIdHex(party_id))
+		partyRecord, err = models.PartyByID(db, bson.ObjectIdHex(partyId))
 
 		if err == mgo.ErrNotFound {
 			context.JSON(400, gin.H{
@@ -281,15 +283,15 @@ func (c *PartyController) Leave(context *gin.Context) {
 		}
 	}
 
-	if user_id == party_record.HostID {
+	if userId == partyRecord.HostID {
 		// Handle a host leaving
 
-		if len(party_record.Attendees) == 0 {
+		if len(partyRecord.Attendees) == 0 {
 			// Cleanup the party if it's empty
 
-			if session_exists {
-				party_session.Close()
-			} else if err := party_record.Remove(db); err != nil {
+			if sessionExists {
+				partySession.Close()
+			} else if err := partyRecord.Remove(db); err != nil {
 				context.AbortWithError(500, err)
 				return
 			}
@@ -299,40 +301,40 @@ func (c *PartyController) Leave(context *gin.Context) {
 		} else if _, ok := context.GetQuery("end_party"); ok {
 			// Cleanup the party and notify the guests of close
 
-			if session_exists {
-				party_session.Close()
-			} else if err := party_record.Remove(db); err != nil {
+			if sessionExists {
+				partySession.Close()
+			} else if err := partyRecord.Remove(db); err != nil {
 				context.AbortWithError(500, err)
 				return
 			}
 
 			context.JSON(200, bson.M{})
 			return
-		} else if transfer_id, ok := context.GetQuery("transfer_to"); ok {
-			transfer_to := bson.ObjectIdHex(transfer_id)
+		} else if transferId, ok := context.GetQuery("transfer_to"); ok {
+			transferTo := bson.ObjectIdHex(transferId)
 
-			if err := party_record.TransferHost(db, transfer_to); err != nil {
+			if err := partyRecord.TransferHost(db, transferTo); err != nil {
 				context.AbortWithError(500, err)
 				return
 			}
 
-			if err := party_record.WithHost(db); err != nil {
+			if err := partyRecord.WithHost(db); err != nil {
 				context.AbortWithError(500, err)
 			}
 
-			if session_exists {
-				if err := party_session.AttendeesChanged(); err != nil {
+			if sessionExists {
+				if err := partySession.AttendeesChanged(); err != nil {
 					context.AbortWithError(500, err)
 				}
 
-				transfer_user, err := models.UserByID(db, transfer_to)
+				transferUser, err := models.UserByID(db, transferTo)
 
 				if err != nil {
 					context.AbortWithError(500, err)
 					return
 				}
 
-				party_session.TransferHost(*transfer_user)
+				partySession.TransferHost(*transferUser)
 			}
 
 			context.JSON(200, gin.H{})
@@ -351,7 +353,7 @@ func (c *PartyController) Leave(context *gin.Context) {
 	} else {
 		// Handle an attendee leaving
 
-		err = party_record.RemoveAttendee(db, user_id)
+		err = partyRecord.RemoveAttendee(db, userId)
 
 		if err == mgo.ErrNotFound {
 			context.JSON(400, gin.H{
@@ -366,8 +368,8 @@ func (c *PartyController) Leave(context *gin.Context) {
 			return
 		}
 
-		if session_exists {
-			if err := party_session.AttendeesChanged(); err != nil {
+		if sessionExists {
+			if err := partySession.AttendeesChanged(); err != nil {
 				context.AbortWithError(500, err)
 			}
 		}
@@ -377,7 +379,7 @@ func (c *PartyController) Leave(context *gin.Context) {
 }
 
 func (c *PartyController) Connect(context *gin.Context, m *melody.Melody) {
-	connect_token, err := url.PathUnescape(context.Param("code"))
+	connectToken, err := url.PathUnescape(context.Param("code"))
 	if err != nil {
 		context.AbortWithError(500, err)
 		return
@@ -391,10 +393,10 @@ func (c *PartyController) Connect(context *gin.Context, m *melody.Melody) {
 	defer conn.Close()
 
 	// Handle the request if the url is valid
-	if success, party_id, err := party.FinishConnect(conn, connect_token); success && err == nil {
+	if success, partyId, err := party.FinishConnect(conn, connectToken); success && err == nil {
 		if err := m.HandleRequestWithKeys(context.Writer, context.Request, gin.H{
 			"channel":  "party",
-			"party_id": party_id,
+			"party_id": partyId,
 			"user_id":  context.GetString("userID"),
 		}); err != nil {
 			context.AbortWithError(500, err)
@@ -411,13 +413,13 @@ func (c *PartyController) Connect(context *gin.Context, m *melody.Melody) {
 }
 
 func (c *PartyController) HandleConnect(s *melody.Session) {
-	party_id := s.MustGet("party_id").(string)
+	partyId := s.MustGet("party_id").(string)
 
 	// Notify others this attendee has become active
-	if session, ok := c.partySessions[party_id]; ok {
+	if session, ok := c.partySessions[partyId]; ok {
 		session.ClientConnected(s)
 	} else {
-		log.Printf("No party session exists for (%s), something's fucky", party_id)
+		log.Printf("No party session exists for (%s), something's fucky", partyId)
 		return
 	}
 
@@ -430,23 +432,23 @@ func (c *PartyController) HandleConnect(s *melody.Session) {
 }
 
 func (c *PartyController) HandleDisconnect(s *melody.Session) {
-	party_id, _ := s.Get("party_id")
+	partyId, _ := s.Get("party_id")
 
-	if session, ok := c.partySessions[party_id.(string)]; ok {
+	if session, ok := c.partySessions[partyId.(string)]; ok {
 		// Cleanup session from the party map
 		session.ClientDisconnected(s)
 	} else {
-		log.Printf("No party session exists for (%s), something's fucky", party_id)
+		log.Printf("No party session exists for (%s), something's fucky", partyId)
 	}
 }
 
-func (c *PartyController) PushSocket(s *melody.Session, raw_item json.RawMessage) {
+func (c *PartyController) PushSocket(s *melody.Session, rawItem json.RawMessage) {
 	u := &models.ItemUnpacker{}
 
-	err := json.Unmarshal(raw_item, u)
+	err := json.Unmarshal(rawItem, u)
 
 	if err != nil {
-		error_res, _ := json.Marshal(gin.H{
+		errorRes, _ := json.Marshal(gin.H{
 			"type": "error",
 			"error": gin.H{
 				"code": "invalid_json",
@@ -454,25 +456,25 @@ func (c *PartyController) PushSocket(s *melody.Session, raw_item json.RawMessage
 			},
 		})
 
-		s.Write([]byte(error_res))
+		s.Write([]byte(errorRes))
 		return
 	}
 
 	item := u.Result
 
-	user_id := s.MustGet("user_id").(string)
-	item.Added(bson.ObjectIdHex(user_id))
+	userId := s.MustGet("user_id").(string)
+	item.Added(bson.ObjectIdHex(userId))
 
-	party_id, _ := s.Get("party_id")
+	partyId, _ := s.Get("party_id")
 
-	if session, ok := c.partySessions[party_id.(string)]; ok {
+	if session, ok := c.partySessions[partyId.(string)]; ok {
 		// Cleanup session from the party map
 		if err := session.Push(item); err != nil {
 			log.Println("Failed pushing item to queue", err)
 			return
 		}
 	} else {
-		log.Printf("No party session exists for (%s), something's fucky", party_id)
+		log.Printf("No party session exists for (%s), something's fucky", partyId)
 	}
 }
 
@@ -494,26 +496,26 @@ func (c *PartyController) PushHTTP(context *gin.Context) {
 
 	item := u.Result
 
-	user_id := context.MustGet("userID").(string)
-	item.Added(bson.ObjectIdHex(user_id))
+	userId := context.MustGet("userID").(string)
+	item.Added(bson.ObjectIdHex(userId))
 
-	party_id := context.Query("id")
+	partyId := context.Query("id")
 
-	if session, ok := c.partySessions[party_id]; ok {
+	if session, ok := c.partySessions[partyId]; ok {
 		// Cleanup session from the party map
 		if err := session.Push(item); err != nil {
 			context.AbortWithError(500, err)
 		}
 		context.JSON(200, gin.H{})
 	} else {
-		context.AbortWithError(500, errors.New("No party session exists for (%s), something's fucky"+party_id))
+		context.AbortWithError(500, errors.New("No party session exists for (%s), something's fucky"+partyId))
 	}
 }
 
 func (c *PartyController) Play(context *gin.Context) {
-	party_id := bson.ObjectIdHex(context.Query("id"))
+	partyId := bson.ObjectIdHex(context.Query("id"))
 
-	if !party_id.Valid() {
+	if !partyId.Valid() {
 		context.AbortWithStatusJSON(400, gin.H{
 			"type": "error",
 			"error": gin.H{
@@ -523,7 +525,7 @@ func (c *PartyController) Play(context *gin.Context) {
 		})
 	}
 
-	if session, ok := c.partySessions[party_id.Hex()]; ok {
+	if session, ok := c.partySessions[partyId.Hex()]; ok {
 		if err := session.Play(); err != nil {
 			context.AbortWithError(500, err)
 		} else {
@@ -533,9 +535,9 @@ func (c *PartyController) Play(context *gin.Context) {
 }
 
 func (c *PartyController) Pause(context *gin.Context) {
-	party_id := bson.ObjectIdHex(context.Query("id"))
+	partyId := bson.ObjectIdHex(context.Query("id"))
 
-	if !party_id.Valid() {
+	if !partyId.Valid() {
 		context.AbortWithStatusJSON(400, gin.H{
 			"type": "error",
 			"error": gin.H{
@@ -545,7 +547,7 @@ func (c *PartyController) Pause(context *gin.Context) {
 		})
 	}
 
-	if session, ok := c.partySessions[party_id.Hex()]; ok {
+	if session, ok := c.partySessions[partyId.Hex()]; ok {
 		if err := session.Pause(); err != nil {
 			context.AbortWithError(500, err)
 		} else {
@@ -555,9 +557,9 @@ func (c *PartyController) Pause(context *gin.Context) {
 }
 
 func (c *PartyController) Next(context *gin.Context) {
-	party_id := bson.ObjectIdHex(context.Query("id"))
+	partyId := bson.ObjectIdHex(context.Query("id"))
 
-	if !party_id.Valid() {
+	if !partyId.Valid() {
 		context.AbortWithStatusJSON(400, gin.H{
 			"type": "error",
 			"error": gin.H{
@@ -567,7 +569,7 @@ func (c *PartyController) Next(context *gin.Context) {
 		})
 	}
 
-	if session, ok := c.partySessions[party_id.Hex()]; ok {
+	if session, ok := c.partySessions[partyId.Hex()]; ok {
 		if err := session.Next(); err != nil {
 			context.AbortWithError(500, err)
 		} else {

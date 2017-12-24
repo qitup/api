@@ -1,14 +1,15 @@
 package models
 
 import (
+	"strings"
+	"time"
+
+	"github.com/Pallinder/go-randomdata"
+	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/oauth2"
+	"gopkg.in/dgrijalva/jwt-go.v3"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
-	"time"
-	"gopkg.in/dgrijalva/jwt-go.v3"
-	"strings"
-	"github.com/Pallinder/go-randomdata"
-	"golang.org/x/oauth2"
-	"golang.org/x/crypto/bcrypt"
 )
 
 type APIClaims struct {
@@ -19,7 +20,7 @@ type APIClaims struct {
 	CanHost  bool   `json:"can_host"`
 }
 
-const USER_COLLECTION = "users"
+const UserCollection = "users"
 
 type User struct {
 	ID         bson.ObjectId `json:"id" bson:"_id"`
@@ -53,18 +54,18 @@ type Identity struct {
 }
 
 func (u *User) Save(db *mgo.Database) error {
-	_, err := db.C(USER_COLLECTION).Upsert(bson.M{"_id": u.ID}, u)
+	_, err := db.C(UserCollection).Upsert(bson.M{"_id": u.ID}, u)
 	return err
 }
 
 func (u *User) Insert(db *mgo.Database) error {
-	err := db.C(USER_COLLECTION).Insert(u)
+	err := db.C(UserCollection).Insert(u)
 	return err
 }
 
 func UserByID(db *mgo.Database, id bson.ObjectId) (*User, error) {
 	var user User
-	err := db.C(USER_COLLECTION).FindId(id).One(&user)
+	err := db.C(UserCollection).FindId(id).One(&user)
 
 	return &user, err
 }
@@ -87,7 +88,7 @@ func UpdateUserByIdentity(db *mgo.Database, identity Identity) (*User, error) {
 		ReturnNew: true,
 	}
 
-	_, err := db.C(USER_COLLECTION).Find(bson.M{
+	_, err := db.C(UserCollection).Find(bson.M{
 		"identities": bson.M{
 			"$elemMatch": bson.M{
 				"email":    identity.Email,
@@ -100,7 +101,7 @@ func UpdateUserByIdentity(db *mgo.Database, identity Identity) (*User, error) {
 }
 
 func UpdateUserIdentity(db *mgo.Database, id bson.ObjectId, identity Identity) (error) {
-	bulk := db.C(USER_COLLECTION).Bulk()
+	bulk := db.C(UserCollection).Bulk()
 
 	pairs := []interface{}{
 		bson.M{"_id": id},
@@ -123,7 +124,7 @@ func UpdateUserIdentity(db *mgo.Database, id bson.ObjectId, identity Identity) (
 	return err
 }
 
-func (u *User) NewToken(host string, signing_key []byte) (string, error) {
+func (u *User) NewToken(host string, signingKey []byte) (string, error) {
 	claims := APIClaims{
 		StandardClaims: jwt.StandardClaims{
 			IssuedAt:  time.Now().Unix(),
@@ -141,7 +142,7 @@ func (u *User) NewToken(host string, signing_key []byte) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
 	// Sign and get the complete encoded token as a string using the secret
-	return token.SignedString(signing_key)
+	return token.SignedString(signingKey)
 }
 
 func (u *User) AssumeIdentity(db *mgo.Database, identity Identity) error {
@@ -186,7 +187,7 @@ func (u *User) GetIdentityToken(provider string) *oauth2.Token {
 func Authenticate(db *mgo.Database, email string, password []byte) (*User, error) {
 	var user User
 
-	err := db.C(USER_COLLECTION).Find(bson.M{
+	err := db.C(UserCollection).Find(bson.M{
 		"email": email,
 	}).One(&user)
 

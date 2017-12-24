@@ -1,15 +1,17 @@
 package controllers
 
 import (
+	"errors"
+	"strings"
+
 	"dubclan/api/models"
+	"dubclan/api/store"
+
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
+	"gopkg.in/dgrijalva/jwt-go.v3"
 	"gopkg.in/mgo.v2"
 	"gopkg.in/mgo.v2/bson"
-	"errors"
-	"dubclan/api/store"
-	"golang.org/x/crypto/bcrypt"
-	"strings"
-	"gopkg.in/dgrijalva/jwt-go.v3"
 )
 
 type UserController struct {
@@ -67,7 +69,7 @@ func (c *UserController) parseToken(context *gin.Context) (*jwt.Token, error) {
 // 		Does identity's email collide with identity for an existing user of this provider?
 // 		Yes -> Login/Refresh Access token
 // 		No -> register new user in store
-func (c *UserController) CompleteUserAuth(context *gin.Context, assume_identity models.Identity) (*models.User, error) {
+func (c *UserController) CompleteUserAuth(context *gin.Context, assumeIdentity models.Identity) (*models.User, error) {
 	session, db := c.Mongo.DB()
 	defer session.Close()
 
@@ -75,23 +77,23 @@ func (c *UserController) CompleteUserAuth(context *gin.Context, assume_identity 
 		claims := token.Claims.(jwt.MapClaims)
 		id := bson.ObjectIdHex(claims["sub"].(string))
 
-		if err := models.UpdateUserIdentity(db, id, assume_identity); err == nil {
+		if err := models.UpdateUserIdentity(db, id, assumeIdentity); err == nil {
 			return &models.User{ID: id}, nil
 		} else {
 			return nil, err
 		}
 	} else {
-		if user, err := models.UpdateUserByIdentity(db, assume_identity); err == nil {
+		if user, err := models.UpdateUserByIdentity(db, assumeIdentity); err == nil {
 			return user, nil
 		} else if err == mgo.ErrNotFound {
-			new_user := &models.User{
+			newUser := &models.User{
 				ID:         bson.NewObjectId(),
-				Identities: []*models.Identity{&assume_identity},
-				CanHost:    assume_identity.Provider == "spotify",
+				Identities: []*models.Identity{&assumeIdentity},
+				CanHost:    assumeIdentity.Provider == "spotify",
 			}
 
-			if err := new_user.AssumeIdentity(db, assume_identity); err == nil {
-				return new_user, nil
+			if err := newUser.AssumeIdentity(db, assumeIdentity); err == nil {
+				return newUser, nil
 			} else {
 				return nil, err
 			}
@@ -124,7 +126,7 @@ func (c *UserController) Signup(context *gin.Context, host string) {
 		context.AbortWithError(500, err)
 	}
 
-	new_user := &models.User{
+	newUser := &models.User{
 		ID:       bson.NewObjectId(),
 		CanHost:  false,
 		Email:    fields.Email,
@@ -133,7 +135,7 @@ func (c *UserController) Signup(context *gin.Context, host string) {
 	}
 
 	// Ensure account doesnt exist
-	if err := new_user.Insert(db); err != nil {
+	if err := newUser.Insert(db); err != nil {
 		if mgo.IsDup(err) {
 			context.JSON(400, gin.H{
 				"code":    400,
@@ -145,7 +147,7 @@ func (c *UserController) Signup(context *gin.Context, host string) {
 		return
 	}
 
-	token, err := new_user.NewToken(host, c.key)
+	token, err := newUser.NewToken(host, c.key)
 	if err != nil {
 		context.AbortWithError(500, err)
 	}
@@ -198,14 +200,14 @@ func (c *UserController) Me(context *gin.Context) {
 	session, db := c.Mongo.DB()
 	defer session.Close()
 
-	if user_id, exists := context.Get("userID"); exists {
+	if userId, exists := context.Get("userID"); exists {
 
-		if user, err := models.UserByID(db, bson.ObjectIdHex(user_id.(string))); err == nil {
+		if user, err := models.UserByID(db, bson.ObjectIdHex(userId.(string))); err == nil {
 			context.JSON(200, user)
 		} else {
 			context.AbortWithError(500, err)
 		}
 	} else {
-		context.AbortWithError(500, errors.New("user id is nil somehow..."))
+		context.AbortWithError(500, errors.New("user id is nil"))
 	}
 }

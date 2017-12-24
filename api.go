@@ -10,10 +10,10 @@ import (
 
 	"dubclan/api/controllers"
 	"dubclan/api/models"
-	spotifyPlayer "dubclan/api/player/spotify"
+	SpotifyPlayer "dubclan/api/player/spotify"
 	"dubclan/api/store"
 
-	jwtMiddleware "github.com/appleboy/gin-jwt"
+	JwtMiddleware "github.com/appleboy/gin-jwt"
 	"github.com/gin-gonic/gin"
 	"github.com/markbates/goth"
 	"github.com/olahol/melody"
@@ -101,7 +101,7 @@ func api(cli *cli.Context) error {
 		Unique: true,
 	}
 
-	err = session.DB(cli.String("database")).C(models.PARTY_COLLECTION).EnsureIndex(index)
+	err = session.DB(cli.String("database")).C(models.PartyCollection).EnsureIndex(index)
 	if err != nil {
 		panic(err)
 	}
@@ -111,7 +111,7 @@ func api(cli *cli.Context) error {
 		Unique: true,
 	}
 
-	err = session.DB(cli.String("database")).C(models.USER_COLLECTION).EnsureIndex(index)
+	err = session.DB(cli.String("database")).C(models.UserCollection).EnsureIndex(index)
 	if err != nil {
 		panic(err)
 	}
@@ -136,7 +136,7 @@ func api(cli *cli.Context) error {
 		callbackUrl = httpProtocol + "://" + cli.String("host") + ":" + cli.String("port")
 	}
 
-	goth.UseProviders(spotifyPlayer.InitProvider(callbackUrl, cli))
+	goth.UseProviders(SpotifyPlayer.InitProvider(callbackUrl, cli))
 
 	gothic.GetProviderName = func(req *http.Request) (string, error) {
 		parts := strings.Split(req.URL.Path, "/")
@@ -144,7 +144,7 @@ func api(cli *cli.Context) error {
 		return parts[2], nil
 	}
 
-	authMiddleware := &jwtMiddleware.GinJWTMiddleware{
+	authMiddleware := &JwtMiddleware.GinJWTMiddleware{
 		Realm:      "api",
 		Key:        signingKey,
 		Timeout:    time.Hour * 5,
@@ -183,16 +183,10 @@ func api(cli *cli.Context) error {
 			context.Error(err)
 		}
 
-		res := gin.H{
-			"token": tokenBlob,
-		}
-
-		if identity.Provider == "spotify" {
-			res["access_token"] = identity.AccessToken
-		}
-
 		// Pass the JWT token, and identity access token to the client
-		context.JSON(200, res)
+		context.JSON(200, gin.H{
+			"token": tokenBlob,
+		})
 	})
 
 	router.GET("/logout/:provider", func(context *gin.Context) {

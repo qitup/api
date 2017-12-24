@@ -1,13 +1,14 @@
 package models
 
 import (
-	"time"
-	"gopkg.in/mgo.v2/bson"
-	"gopkg.in/mgo.v2"
 	"errors"
+	"time"
+
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
 )
 
-const PARTY_COLLECTION = "parties"
+const PartyCollection = "parties"
 
 type Party struct {
 	ID        bson.ObjectId `json:"id" bson:"_id"`
@@ -30,13 +31,13 @@ type Attendee struct {
 	JoinedAt time.Time     `json:"joined_at" bson:"joined_at"`
 }
 
-func NewParty(host_id bson.ObjectId, name, join_code string, settings Settings) (Party) {
+func NewParty(hostId bson.ObjectId, name, joinCode string, settings Settings) (Party) {
 	return Party{
 		ID:        bson.NewObjectId(),
-		HostID:    host_id,
+		HostID:    hostId,
 		Attendees: []*Attendee{},
 		Name:      name,
-		JoinCode:  join_code,
+		JoinCode:  joinCode,
 		CreatedAt: time.Now(),
 		Settings:  settings,
 	}
@@ -53,12 +54,12 @@ func NewAttendee(user User) Attendee {
 func PartyByCode(db *mgo.Database, code string) (*Party, error) {
 	var party Party
 
-	err := db.C(PARTY_COLLECTION).Pipe([]bson.M{
+	err := db.C(PartyCollection).Pipe([]bson.M{
 		{"$match": bson.M{"join_code": code}},
 		{
 			"$lookup": bson.M{
 				"localField":   "host_id",
-				"from":         USER_COLLECTION,
+				"from":         UserCollection,
 				"foreignField": "_id",
 				"as":           "host",
 			},
@@ -68,7 +69,7 @@ func PartyByCode(db *mgo.Database, code string) (*Party, error) {
 		{
 			"$lookup": bson.M{
 				"localField":   "attendees.user_id",
-				"from":         USER_COLLECTION,
+				"from":         UserCollection,
 				"foreignField": "_id",
 				"as":           "attendees.user",
 			},
@@ -105,12 +106,12 @@ func PartyByCode(db *mgo.Database, code string) (*Party, error) {
 func PartyByID(db *mgo.Database, id bson.ObjectId) (*Party, error) {
 	var party Party
 
-	err := db.C(PARTY_COLLECTION).Pipe([]bson.M{
+	err := db.C(PartyCollection).Pipe([]bson.M{
 		{"$match": bson.M{"_id": id}},
 		{
 			"$lookup": bson.M{
 				"localField":   "host_id",
-				"from":         USER_COLLECTION,
+				"from":         UserCollection,
 				"foreignField": "_id",
 				"as":           "host",
 			},
@@ -120,7 +121,7 @@ func PartyByID(db *mgo.Database, id bson.ObjectId) (*Party, error) {
 		{
 			"$lookup": bson.M{
 				"localField":   "attendees.user_id",
-				"from":         USER_COLLECTION,
+				"from":         UserCollection,
 				"foreignField": "_id",
 				"as":           "attendees.user",
 			},
@@ -155,19 +156,19 @@ func PartyByID(db *mgo.Database, id bson.ObjectId) (*Party, error) {
 }
 
 func (p *Party) Insert(db *mgo.Database) error {
-	err := db.C(PARTY_COLLECTION).Insert(p)
+	err := db.C(PartyCollection).Insert(p)
 
 	return err
 }
 
 func (p *Party) Save(db *mgo.Database) error {
-	_, err := db.C(PARTY_COLLECTION).Upsert(bson.M{"_id": p.ID}, p)
+	_, err := db.C(PartyCollection).Upsert(bson.M{"_id": p.ID}, p)
 
 	return err
 }
 
 func (p *Party) AddAttendee(db *mgo.Database, attendee *Attendee) (error) {
-	err := db.C(PARTY_COLLECTION).Update(bson.M{
+	err := db.C(PartyCollection).Update(bson.M{
 		"_id": p.ID,
 		"attendees": bson.M{
 			"$not": bson.M{
@@ -187,16 +188,16 @@ func (p *Party) AddAttendee(db *mgo.Database, attendee *Attendee) (error) {
 	return err
 }
 
-func (p *Party) RemoveAttendee(db *mgo.Database, user_id bson.ObjectId) (error) {
-	err := db.C(PARTY_COLLECTION).Update(bson.M{
+func (p *Party) RemoveAttendee(db *mgo.Database, userId bson.ObjectId) (error) {
+	err := db.C(PartyCollection).Update(bson.M{
 		"_id": p.ID,
 	}, bson.M{
-		"$pull": bson.M{"attendees": bson.M{"user_id": user_id}},
+		"$pull": bson.M{"attendees": bson.M{"user_id": userId}},
 	})
 
 	if err == nil {
 		for i, attendee := range p.Attendees {
-			if attendee.UserId == user_id {
+			if attendee.UserId == userId {
 				p.Attendees = append(p.Attendees[:i], p.Attendees[i+1:]...)
 				break
 			}
@@ -220,11 +221,11 @@ func (p *Party) WithHost(db *mgo.Database) (error) {
 }
 
 func (p *Party) Remove(db *mgo.Database) error {
-	return db.C(PARTY_COLLECTION).RemoveId(p.ID)
+	return db.C(PartyCollection).RemoveId(p.ID)
 }
 
 func (p *Party) TransferHost(db *mgo.Database, to bson.ObjectId) error {
-	err := db.C(PARTY_COLLECTION).Update(bson.M{
+	err := db.C(PartyCollection).Update(bson.M{
 		"_id": p.ID,
 	}, bson.M{
 		"$pull": bson.M{"attendees": bson.M{"user_id": to}},

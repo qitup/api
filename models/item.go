@@ -1,11 +1,12 @@
 package models
 
 import (
-	"time"
-	"errors"
 	"encoding/json"
-	"gopkg.in/mgo.v2/bson"
+	"errors"
+	"time"
+
 	"github.com/zmb3/spotify"
+	"gopkg.in/mgo.v2/bson"
 )
 
 type Item interface {
@@ -79,9 +80,9 @@ func (u *ItemUnpacker) UnmarshalJSON(b []byte) (error) {
 		return err
 	}
 
-	if item_type, ok := m["type"].(string); ok {
+	if itemType, ok := m["type"].(string); ok {
 		var item Item
-		switch item_type {
+		switch itemType {
 		case "spotify_track":
 			item = &SpotifyTrack{}
 			break

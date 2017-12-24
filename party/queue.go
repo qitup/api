@@ -1,10 +1,12 @@
 package party
 
 import (
-	"github.com/garyburd/redigo/redis"
 	"encoding/json"
 	"log"
+
 	"dubclan/api/models"
+
+	"github.com/garyburd/redigo/redis"
 )
 
 type Queue struct {
@@ -38,14 +40,14 @@ func ResumeQueue(conn redis.Conn, id string) (*Queue, error) {
 }
 
 func (q *Queue) GetNextPlayableList() []models.Item {
-	first_type := ""
-	items := []models.Item{}
+	firstType := ""
+	var items []models.Item
 	for _, item := range q.Items {
-		if first_type == "" {
-			first_type = item.GetType()
+		if firstType == "" {
+			firstType = item.GetType()
 			items = append(items, item)
 		} else {
-			if item_type := item.GetType(); item_type == first_type {
+			if itemType := item.GetType(); itemType == firstType {
 				items = append(items, item)
 			} else {
 				break

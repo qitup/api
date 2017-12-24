@@ -1,9 +1,10 @@
 package main
 
 import (
-	"os"
-	"github.com/urfave/cli"
 	"fmt"
+	"os"
+
+	"github.com/urfave/cli"
 )
 
 var flags = []cli.Flag{
